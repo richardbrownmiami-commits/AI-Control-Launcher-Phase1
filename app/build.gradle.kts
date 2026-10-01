@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "com.aicontrol.launcher"
     compileSdk = 35
+    ndkVersion = "27.0.12077973"
     defaultConfig {
         applicationId = "com.aicontrol.launcher"
         minSdk = 30
