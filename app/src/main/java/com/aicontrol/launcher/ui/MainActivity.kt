@@ -87,7 +87,7 @@ class MainActivity:Activity(){
  private fun trimHistory(){while(history.size>8)history.removeFirst()}
  private fun persistHistory(){val a=JSONArray();history.forEach{a.put(JSONObject().put("role",it.role).put("content",it.content))};historyPrefs.edit().putString("turns",a.toString()).apply()}
  private fun loadHistory(){val a=JSONArray(historyPrefs.getString("turns","[]")?:"[]");for(i in 0 until a.length()){val j=a.getJSONObject(i);history.addLast(AiTurn(j.optString("role"),j.optString("content")))};trimHistory()}
- private fun restoreBubbles(){history.forEach{bubble(it.role.replaceFirstChar{c->c.uppercase()},it.content)}}
+ private fun restoreBubbles(){history.forEach{bubble(if(it.role=="assistant")"AI" else if(it.role=="user")"You" else "System",it.content)}}
  private fun clearChat(){history.clear();historyPrefs.edit().remove("turns").apply();chat.removeAllViews();bubble("AI","Chat cleared. What would you like to create?")}
  private fun bubble(w:String,m:String){val color=when(w){"You"->UiTheme.card2;"System"->UiTheme.card;else->UiTheme.card};chat.addView(TextView(this).apply{text=w+"  "+m;textSize=14f;setTextColor(Color.WHITE);setPadding(dp(12),dp(8),dp(12),dp(8));background=UiTheme.rounded(color,17f);layoutParams=LinearLayout.LayoutParams(-1,-2).apply{bottomMargin=dp(6)}});chatScroll.post{chatScroll.fullScroll(ScrollView.FOCUS_DOWN)}}
  private fun columns(l:String)=when(l.lowercase()){"dense","compact"->5;"wide"->3;else->4}
