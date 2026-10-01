@@ -13,6 +13,7 @@ class AssetsActivity : Activity() {
     private lateinit var catalog: AssetCatalog
     private lateinit var manager: LauncherAssetManager
     private lateinit var list: LinearLayout
+    private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
