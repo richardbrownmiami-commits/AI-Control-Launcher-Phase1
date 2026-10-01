@@ -42,35 +42,40 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Build ARMv7a release APK only
+      - name: Build debug APK
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+
+      - name: Build release APK
         run: gradle --no-daemon :app:assembleRelease --stacktrace
 
-      - name: Verify ARMv7a-only APK
+      - name: Verify ARMv7a-only APKs
         run: |
           set -euo pipefail
-          APK="app/build/outputs/apk/release/app-release.apk"
-          test -f "$APK"
-          ls -lh "$APK"
-          python3 - "$APK" <<'PY'
+          for APK in app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/release/app-release.apk; do
+            test -f "$APK"
+            echo "APK: $APK"
+            ls -lh "$APK"
+            python3 - "$APK" <<'PY'
           import sys, zipfile
           apk = sys.argv[1]
           with zipfile.ZipFile(apk) as z:
               libs = [n for n in z.namelist() if n.startswith("lib/") and n.endswith(".so")]
-          print("Native libraries:")
-          for lib in libs:
-              print("  " + lib)
-          required = [n for n in libs if n.startswith("lib/armeabi-v7a/")]
+          print("Native libraries:", libs)
+          if not libs:
+              raise SystemExit("FAIL: no native library; ARMv7a guard is missing")
           forbidden = [n for n in libs if not n.startswith("lib/armeabi-v7a/")]
-          if not required:
-              raise SystemExit("FAIL: no armeabi-v7a native library")
           if forbidden:
               raise SystemExit("FAIL: non-ARMv7 native libraries: " + ", ".join(forbidden))
-          print("PASS: only lib/armeabi-v7a native code is packaged.")
+          print("PASS: only armeabi-v7a native code is packaged.")
           PY
+          done
 
-      - name: Upload ARMv7a APK
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: ai-control-launcher-armv7a-android11
-          path: app/build/outputs/apk/release/app-release.apk
+          name: ai-control-launcher-armv7a-apks
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
+          retention-days: 30
