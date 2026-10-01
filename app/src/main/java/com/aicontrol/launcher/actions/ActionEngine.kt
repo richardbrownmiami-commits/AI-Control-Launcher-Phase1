@@ -58,7 +58,7 @@ class ActionEngine(context:Context){
    "ocean"->fallback.copy(bg=Color.rgb(6,24,38),accent=Color.rgb(64,214,255))
    "ember"->fallback.copy(bg=Color.rgb(38,16,12),accent=Color.rgb(255,130,70),accent2=Color.rgb(255,70,150))
    "default"->fallback
-   else->runCatching{val j=JSONObject(store.themeFile(theme()).readText());ThemeState(Color.parseColor(j.optString("bg","#080A12")),Color.parseColor(j.optString("accent","#46D2FF")),Color.parseColor(j.optString("accent2","#9B5CFF")),Color.parseColor(j.optString("card","#141723")),j.optString("style",style()))}.getOrDefault(fallback)
+   else->runCatching{val j=JSONObject(store.themeFile(theme()).readText());ThemeState(Color.parseColor(j.optString("bg","#080A12")),Color.parseColor(j.optString("accent","#46D2FF")),Color.parseColor(j.optString("accent2","#9B5CFF")),Color.parseColor(j.optString("card","#141723")),j.optString("style",prefs.getString("style","glass")?:"glass"))}.getOrDefault(fallback)
   }
  }
  fun stateSummary():String{
