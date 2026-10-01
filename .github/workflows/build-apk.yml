@@ -52,25 +52,34 @@ jobs:
           set -e
           DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
           RELEASE_APK="app/build/outputs/apk/release/app-release.apk"
+
           test -f "$DEBUG_APK"
           test -f "$RELEASE_APK"
-          echo "Debug APK:"
-          ls -lh "$DEBUG_APK"
-          echo "Release APK:"
-          ls -lh "$RELEASE_APK"
-          echo "Debug APK native libraries:"
-          unzip -Z1 "$DEBUG_APK" | grep -E '^lib/[^/]+/[^/]+\.so$' || true
-          echo "Release APK native libraries:"
-          unzip -Z1 "$RELEASE_APK" | grep -E '^lib/[^/]+/[^/]+\.so$' || true
-          if unzip -Z1 "$DEBUG_APK" | grep -E '^lib/(arm64-v8a|x86|x86_64)/[^/]+\.so$'; then
-            echo "FAIL: unsupported ABI in debug APK"
-            exit 1
-          fi
-          if unzip -Z1 "$RELEASE_APK" | grep -E '^lib/(arm64-v8a|x86|x86_64)/[^/]+\.so$'; then
-            echo "FAIL: unsupported ABI in release APK"
-            exit 1
-          fi
-          echo "APK build and ABI verification passed: no unsupported 64-bit/x86 native libraries found."
+
+          ls -lh "$DEBUG_APK" "$RELEASE_APK"
+
+          python3 - "$DEBUG_APK" "$RELEASE_APK" <<'PY'
+          import sys
+          import zipfile
+
+          for apk_path in sys.argv[1:]:
+              with zipfile.ZipFile(apk_path) as z:
+                  native = [
+                      n for n in z.namelist()
+                      if n.startswith("lib/") and n.endswith(".so")
+                  ]
+              unsupported = [
+                  n for n in native
+                  if not n.startswith("lib/armeabi-v7a/")
+              ]
+              print(f"{apk_path}: native libraries = {native}")
+              if unsupported:
+                  print(f"FAIL: unsupported native ABI entries: {unsupported}")
+                  raise SystemExit(1)
+
+          print("APK verification passed: no arm64-v8a/x86/x86_64 native libraries.")
+          print("This launcher is pure Kotlin/Java and may contain no native .so files.")
+          PY
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
