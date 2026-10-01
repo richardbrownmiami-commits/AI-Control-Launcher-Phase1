@@ -10,7 +10,7 @@ import kotlinx.coroutines.*
 class SettingsActivity:Activity(){
  private lateinit var s:SettingsStore;private lateinit var models:Spinner;private lateinit var radios:RadioGroup;private lateinit var ok:EditText;private lateinit var gk:EditText
  private fun dp(v:Int)=(v*resources.displayMetrics.density).toInt()
- override fun onCreate(b:Bundle?){super.onCreate(b);s=SettingsStore(this);ui()}
+ override fun onCreate(b:Bundle?){super.onCreate(b);UiTheme.bind(com.aicontrol.launcher.actions.ActionEngine(this));s=SettingsStore(this);ui()}
  private fun ui(){
   val r=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(18),dp(18),dp(18),dp(18));background=UiTheme.gradient(0f)}
   r.addView(TextView(this).apply{text="AI Settings";textSize=26f;setTextColor(UiTheme.textPrimary)});r.addView(label("PROVIDER"))
