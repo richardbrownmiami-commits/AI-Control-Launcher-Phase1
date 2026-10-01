@@ -52,76 +52,25 @@ jobs:
           set -e
           DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
           RELEASE_APK="app/build/outputs/apk/release/app-release.apk"
-          test -f "${DEBUG_APK}"
-          test -f "${RELEASE_APK}"
+          test -f "$DEBUG_APK"
+          test -f "$RELEASE_APK"
           echo "Debug APK:"
-          ls -lh "${DEBUG_APK}"
+          ls -lh "$DEBUG_APK"
           echo "Release APK:"
-          ls -lh "${RELEASE_APK}"
-
-          if unzip -Z1 "${DEBUG_APK}" | grep -E '^lib/(arm64-v8a|x86|x86_64)/.+
+          ls -lh "$RELEASE_APK"
+          echo "Debug APK native libraries:"
+          unzip -Z1 "$DEBUG_APK" | grep -E '^lib/[^/]+/[^/]+\.so$' || true
+          echo "Release APK native libraries:"
+          unzip -Z1 "$RELEASE_APK" | grep -E '^lib/[^/]+/[^/]+\.so$' || true
+          if unzip -Z1 "$DEBUG_APK" | grep -E '^lib/(arm64-v8a|x86|x86_64)/[^/]+\.so$'; then
             echo "FAIL: unsupported ABI in debug APK"
             exit 1
           fi
-          if unzip -Z1 "${RELEASE_APK}" | grep -E '^lib/(arm64-v8a|x86|x86_64)/.+
+          if unzip -Z1 "$RELEASE_APK" | grep -E '^lib/(arm64-v8a|x86|x86_64)/[^/]+\.so$'; then
             echo "FAIL: unsupported ABI in release APK"
             exit 1
           fi
-
-          echo "APK build and ABI verification passed."
-
-      - name: Upload APKs
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-control-launcher-phase1-armv7-apks
-          path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
-; then
-            echo "FAIL: unsupported ABI in debug APK"
-            exit 1
-          fi
-          if unzip -l "${RELEASE_APK}" | grep -E 'lib/(arm64-v8a|x86|x86_64)/'; then
-            echo "FAIL: unsupported ABI in release APK"
-            exit 1
-          fi
-
-          echo "APK build and ABI verification passed."
-
-      - name: Upload APKs
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-control-launcher-phase1-armv7-apks
-          path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
-; then
-            echo "FAIL: unsupported ABI in release APK"
-            exit 1
-          fi
-
-          echo "APK build and ABI verification passed."
-
-      - name: Upload APKs
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-control-launcher-phase1-armv7-apks
-          path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
-; then
-            echo "FAIL: unsupported ABI in debug APK"
-            exit 1
-          fi
-          if unzip -l "${RELEASE_APK}" | grep -E 'lib/(arm64-v8a|x86|x86_64)/'; then
-            echo "FAIL: unsupported ABI in release APK"
-            exit 1
-          fi
-
-          echo "APK build and ABI verification passed."
+          echo "APK build and ABI verification passed: no unsupported 64-bit/x86 native libraries found."
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
