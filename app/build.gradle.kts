@@ -23,7 +23,7 @@ android {
     }
 
     buildTypes {
-        release { isMinifyEnabled = false; isDebuggable = false }
+        release { isMinifyEnabled = false; isDebuggable = false; signingConfig = signingConfigs.getByName("debug") }
         debug { isMinifyEnabled = false }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
