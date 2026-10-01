@@ -29,7 +29,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        System.loadLibrary(NATIVE_ABI_GUARD)
+        runCatching { System.loadLibrary(NATIVE_ABI_GUARD) }
         settings = SettingsStore(this)
         apps = AppRepository(this)
         engine = ActionEngine(this)
