@@ -14,7 +14,7 @@ class ActionEngine(context:Context){
  private val prefs=context.getSharedPreferences("launcher_state",Context.MODE_PRIVATE)
  private val assets=LauncherAssetManager(context);private val store=AssetStore(context);private val apps=AppRepository(context)
 
- fun applyJson(json:String): Result<Int> = runCatching {
+ fun applyJson(json: String): kotlin.Result<Int> = runCatching {
   val actions=JSONObject(json).optJSONArray("actions")?:JSONArray();var applied=0
   for(i in 0 until actions.length()){val a=actions.getJSONObject(i);when(a.optString("action")){
    "HIDE_APPS"->{setPackages("hidden",a.optJSONArray("packages"));applied++}
