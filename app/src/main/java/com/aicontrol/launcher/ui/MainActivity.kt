@@ -7,13 +7,14 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.widget.*
 
-private const val NATIVE_ABI_GUARD = "launcherabi"
 import com.aicontrol.launcher.actions.ActionEngine
 import com.aicontrol.launcher.ai.OpenAiCompatibleProvider
 import com.aicontrol.launcher.apps.AppInfo
 import com.aicontrol.launcher.apps.AppRepository
 import com.aicontrol.launcher.data.SettingsStore
 import kotlinx.coroutines.*
+
+private const val NATIVE_ABI_GUARD = "launcherabi"
 
 class MainActivity : Activity() {
     private lateinit var settings: SettingsStore
