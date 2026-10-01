@@ -14,7 +14,7 @@ class ActionEngine(context:Context){
  private val prefs=context.getSharedPreferences("launcher_state",Context.MODE_PRIVATE)
  private val assets=LauncherAssetManager(context);private val store=AssetStore(context);private val apps=AppRepository(context)
 
- fun applyJson(json:String):Result<Int>=runCatching{
+ fun applyJson(json:String): Result<Int> = runCatching {
   val actions=JSONObject(json).optJSONArray("actions")?:JSONArray();var applied=0
   for(i in 0 until actions.length()){val a=actions.getJSONObject(i);when(a.optString("action")){
    "HIDE_APPS"->{setPackages("hidden",a.optJSONArray("packages"));applied++}
@@ -45,7 +45,7 @@ class ActionEngine(context:Context){
  private fun addShortcut(label:String,pkg:String,activity:String){require(label.isNotBlank()&&pkg.isNotBlank()){"Shortcut label/package required"};val arr=JSONArray(prefs.getString("shortcuts","[]")?:"[]");arr.put(JSONObject().put("label",label).put("package",pkg).put("activity",activity));prefs.edit().putString("shortcuts",arr.toString()).apply()}
  private fun removeShortcut(label:String,pkg:String){val old=JSONArray(prefs.getString("shortcuts","[]")?:"[]");val out=JSONArray();for(i in 0 until old.length()){val item=old.getJSONObject(i);if((label.isNotBlank()&&item.optString("label")==label)||(pkg.isNotBlank()&&item.optString("package")==pkg))continue;out.put(item)};prefs.edit().putString("shortcuts",out.toString()).apply()}
  fun shortcuts():List<JSONObject>{val a=JSONArray(prefs.getString("shortcuts","[]")?:"[]");return(0 until a.length()).map{a.getJSONObject(it)}}
- fun hiddenPackages():Set<String>=prefs.getStringSet("hidden",emptySet())?:emptySet()
+ fun hiddenPackages(): Set<String> = prefs.getStringSet("hidden",emptySet())?:emptySet()
  fun theme():String=prefs.getString("theme","default")?:"default"
  fun layout():String=prefs.getString("layout","grid")?:"grid"
  fun style():String=prefs.getString("style",themeState().style)?:"glass"
