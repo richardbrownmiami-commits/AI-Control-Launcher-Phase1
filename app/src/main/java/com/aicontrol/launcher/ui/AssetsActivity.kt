@@ -21,12 +21,12 @@ class AssetsActivity : Activity() {
 
     private fun buildUi() {
         val root=LinearLayout(this).apply {
-            orientation=LinearLayout.VERTICAL; setPadding(18,18,18,18); setBackgroundColor(Color.rgb(16,18,24))
+            orientation=LinearLayout.VERTICAL; setPadding(18,18,18,18); background=UiTheme.gradient(0f)
         }
         root.addView(TextView(this).apply { text="Launcher Assets"; textSize=24f; setTextColor(Color.WHITE) })
         root.addView(TextView(this).apply {
-            text="Private assets downloaded by the launcher. Apply or delete them here."
-            setTextColor(Color.LTGRAY); setPadding(0,6,0,12)
+            text="Private downloaded assets"
+            setTextColor(UiTheme.textMuted); setPadding(0,6,0,12)
         })
         list=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         root.addView(ScrollView(this).apply { addView(list) },LinearLayout.LayoutParams(-1,0,1f))
@@ -46,12 +46,12 @@ class AssetsActivity : Activity() {
 
     private fun section(title:String,files:List<File>,canApply:Boolean) {
         list.addView(TextView(this).apply {
-            text=title+" ("+files.size+")"; textSize=18f; setTextColor(Color.WHITE); setPadding(0,14,0,6)
+            text=title+" ("+files.size+")"; textSize=18f; setTextColor(UiTheme.accent); setPadding(0,14,0,6)
         })
         files.forEach { file ->
-            val line=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(0,5,0,5) }
+            val line=LinearLayout(this).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(dp(8),dp(6),dp(6),dp(6)); UiTheme.styleCard(this,UiTheme.card,true) }
             line.addView(TextView(this).apply {
-                text=file.name; setTextColor(Color.LTGRAY); layoutParams=LinearLayout.LayoutParams(0,-2,1f)
+                text=file.name; setTextColor(UiTheme.textMuted); layoutParams=LinearLayout.LayoutParams(0,-2,1f)
             })
             if(canApply) line.addView(Button(this).apply {
                 text="Apply"
