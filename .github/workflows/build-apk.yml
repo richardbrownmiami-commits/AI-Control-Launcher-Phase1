@@ -53,9 +53,10 @@ jobs:
           test -f "$APK"
           echo "Debug APK:"
           ls -lh "$APK"
-          mapfile -t libs < <(unzip -Z1 "$APK" | grep '^lib/.*\\.so$' || true)
-          printf '%s\\n' "Native libraries: ${libs[@]:-<none>}"
+          mapfile -t libs < <(unzip -Z1 "$APK" | awk '/^lib\/.*[.]so$/ {print}')
+          printf '%s\n' "Native libraries: ${libs[@]:-<none>}"
           for lib in "${libs[@]}"; do
+            [[ -z "$lib" ]] && continue
             [[ "$lib" == lib/armeabi-v7a/* ]] || { echo "FAIL: $lib"; exit 1; }
           done
           echo "PASS: debug APK contains only ARMv7a native code (or no native libraries)."
@@ -79,9 +80,10 @@ jobs:
           test -f "$APK"
           echo "Release APK:"
           ls -lh "$APK"
-          mapfile -t libs < <(unzip -Z1 "$APK" | grep '^lib/.*\\.so$' || true)
-          printf '%s\\n' "Native libraries: ${libs[@]:-<none>}"
+          mapfile -t libs < <(unzip -Z1 "$APK" | awk '/^lib\/.*[.]so$/ {print}')
+          printf '%s\n' "Native libraries: ${libs[@]:-<none>}"
           for lib in "${libs[@]}"; do
+            [[ -z "$lib" ]] && continue
             [[ "$lib" == lib/armeabi-v7a/* ]] || { echo "FAIL: $lib"; exit 1; }
           done
           echo "PASS: release APK contains only ARMv7a native code (or no native libraries)."
