@@ -31,7 +31,7 @@ jobs:
           cmdline-tools-version: "12266719"
           accept-android-sdk-licenses: true
 
-      - name: Install Android SDK and reference NDK
+      - name: Install Android SDK and NDK
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;${NDK_VERSION}"
@@ -41,23 +41,40 @@ jobs:
         with:
           gradle-version: "8.10.2"
 
+      - name: Build debug APK
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+
       - name: Build release APK
         run: gradle --no-daemon :app:assembleRelease --stacktrace
 
-      - name: Verify APK
+      - name: Verify APK outputs
         run: |
           set -e
-          APK="app/build/outputs/apk/release/app-release.apk"
-          test -f "$APK"
-          if unzip -l "$APK" | grep -E "lib/(arm64-v8a|x86|x86_64)/"; then
-            echo "FAIL: unsupported 64-bit/x86 native library detected"
+          DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
+          RELEASE_APK="app/build/outputs/apk/release/app-release.apk"
+          test -f "${DEBUG_APK}"
+          test -f "${RELEASE_APK}"
+          echo "Debug APK:"
+          ls -lh "${DEBUG_APK}"
+          echo "Release APK:"
+          ls -lh "${RELEASE_APK}"
+
+          if unzip -l "${DEBUG_APK}" | grep -E 'lib/(arm64-v8a|x86|x86_64)/'; then
+            echo "FAIL: unsupported ABI in debug APK"
             exit 1
           fi
-          echo "APK verification passed."
+          if unzip -l "${RELEASE_APK}" | grep -E 'lib/(arm64-v8a|x86|x86_64)/'; then
+            echo "FAIL: unsupported ABI in release APK"
+            exit 1
+          fi
 
-      - name: Upload APK
+          echo "APK build and ABI verification passed."
+
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: ai-control-launcher-phase1-armv7
-          path: app/build/outputs/apk/release/app-release.apk
+          name: ai-control-launcher-phase1-armv7-apks
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
