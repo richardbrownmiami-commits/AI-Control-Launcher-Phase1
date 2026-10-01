@@ -14,7 +14,10 @@ android {
         versionCode = 2
         versionName = "0.2.0-phase1"
         ndk { abiFilters += listOf("armeabi-v7a") }
+        externalNativeBuild { cmake { arguments += listOf("-DANDROID_PLATFORM=android-30") } }
     }
+    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.31.6" } }
+
     lint {
         disable += "ExpiredTargetSdkVersion"
     }
