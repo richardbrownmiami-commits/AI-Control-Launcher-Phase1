@@ -1,0 +1,19 @@
+name: Build ARMv7a Android 11 APK
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+      - run: yes | sdkmanager --licenses || true
+      - run: ./gradlew assembleDebug --stacktrace
+      - name: Verify no arm64 native libs
+        run: |
+          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          if unzip -l "$APK" | grep -q 'lib/arm64-v8a/'; then exit 1; fi
+      - uses: actions/upload-artifact@v4
+        with: { name: ai-control-launcher-armv7-phase1, path: app/build/outputs/apk/debug/*.apk }
