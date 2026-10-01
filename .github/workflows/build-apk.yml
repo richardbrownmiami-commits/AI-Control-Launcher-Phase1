@@ -51,20 +51,15 @@ jobs:
           set -euo pipefail
           APK="app/build/outputs/apk/debug/app-debug.apk"
           test -f "$APK"
+          echo "Debug APK:"
           ls -lh "$APK"
-          python3 - "$APK" <<'PY'
-          import sys, zipfile
-          apk = sys.argv[1]
-          with zipfile.ZipFile(apk) as z:
-              libs = [n for n in z.namelist() if n.startswith("lib/") and n.endswith(".so")]
-          print("Native libraries:", libs)
-          if not libs:
-              raise SystemExit("FAIL: no native library; ARMv7a guard is missing")
-          bad = [n for n in libs if not n.startswith("lib/armeabi-v7a/")]
-          if bad:
-              raise SystemExit("FAIL: non-ARMv7 native libraries: " + ", ".join(bad))
-          print("PASS: debug APK contains only armeabi-v7a native code.")
-          PY
+          mapfile -t libs < <(unzip -Z1 "$APK" | grep '^lib/.*\\.so$' || true)
+          printf '%s\\n' "Native libraries: ${libs[@]:-<none>}"
+          test "${#libs[@]}" -gt 0
+          for lib in "${libs[@]}"; do
+            [[ "$lib" == lib/armeabi-v7a/* ]] || { echo "FAIL: $lib"; exit 1; }
+          done
+          echo "PASS: debug APK contains only armeabi-v7a native code."
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -83,20 +78,15 @@ jobs:
           set -euo pipefail
           APK="app/build/outputs/apk/release/app-release.apk"
           test -f "$APK"
+          echo "Release APK:"
           ls -lh "$APK"
-          python3 - "$APK" <<'PY'
-          import sys, zipfile
-          apk = sys.argv[1]
-          with zipfile.ZipFile(apk) as z:
-              libs = [n for n in z.namelist() if n.startswith("lib/") and n.endswith(".so")]
-          print("Native libraries:", libs)
-          if not libs:
-              raise SystemExit("FAIL: no native library; ARMv7a guard is missing")
-          bad = [n for n in libs if not n.startswith("lib/armeabi-v7a/")]
-          if bad:
-              raise SystemExit("FAIL: non-ARMv7 native libraries: " + ", ".join(bad))
-          print("PASS: release APK contains only armeabi-v7a native code.")
-          PY
+          mapfile -t libs < <(unzip -Z1 "$APK" | grep '^lib/.*\\.so$' || true)
+          printf '%s\\n' "Native libraries: ${libs[@]:-<none>}"
+          test "${#libs[@]}" -gt 0
+          for lib in "${libs[@]}"; do
+            [[ "$lib" == lib/armeabi-v7a/* ]] || { echo "FAIL: $lib"; exit 1; }
+          done
+          echo "PASS: release APK contains only armeabi-v7a native code."
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
