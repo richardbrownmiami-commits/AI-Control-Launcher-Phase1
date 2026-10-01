@@ -15,7 +15,7 @@ android {
         versionName = "0.2.0-phase1"
         ndk { abiFilters += listOf("armeabi-v7a") }
     }
-    buildTypes {
+    lint {\n        disable += "ExpiredTargetSdkVersion"\n    }\n\n    buildTypes {
         release { isMinifyEnabled = false; isDebuggable = false }
         debug { isMinifyEnabled = false }
     }
