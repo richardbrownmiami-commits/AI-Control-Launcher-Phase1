@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  build:
+  build_launcher:
     runs-on: ubuntu-latest
     env:
       NDK_VERSION: "27.0.12077973"
