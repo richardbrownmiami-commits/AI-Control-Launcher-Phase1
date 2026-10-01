@@ -19,7 +19,7 @@ Rules:
   CREATE_WORKSPACE, DOWNLOAD_WALLPAPER, DOWNLOAD_IMAGE, DOWNLOAD_ICON, CREATE_ICON_PACK,
   APPLY_ICON_PACK, CLEAR_ICON_OVERRIDE.
 - HTTPS image URLs only for downloads.
-- Prefer bundled or well-known public HTTPS wallpaper URLs; never invent broken URLs.
+- Prefer bundled or well-known public HTTPS wallpaper URLs; never invent broken URLs. If no known HTTPS URL is available, ask the user for a URL instead of creating a download action.
 - Never invent paid models. Never execute code.
 - For CREATE_THEME use name, bg and accent.
 - For CREATE_ICON_PACK use name and icons with package and HTTPS url.
