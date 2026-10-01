@@ -52,12 +52,12 @@ class MainActivity : Activity() {
             text = "Theme"
             setOnClickListener {
                 val next = if (engine.theme() == "default") "midnight" else "default"
-                engine.applyJson("{\"actions\":[{\"action\":\"SET_THEME\",\"theme\":\"$" + "next\"}]}")
+                engine.applyJson("{\"actions\":[{\"action\":\"SET_THEME\",\"theme\":\"" + next + "\"}]}")
                 root.setBackgroundColor(themeColor()); status.text = "Theme: $"+ "next"
             }
         })
         root.addView(header)
-        root.addView(TextView(this).apply { text = "Dash • $"+"{engine.layout()} layout • $"+"{engine.hiddenPackages().size} hidden"; textSize = 13f; setTextColor(Color.LTGRAY); setPadding(4,4,4,10) })
+        root.addView(TextView(this).apply { text = "Dash • " + engine.layout() + " layout • " + engine.hiddenPackages().size + " hidden"; textSize = 13f; setTextColor(Color.LTGRAY); setPadding(4,4,4,10) })
         search = EditText(this).apply { hint = "Search apps…"; singleLine = true; setTextColor(Color.WHITE); setHintTextColor(Color.GRAY) }
         root.addView(search)
         search.addTextChangedListener(SimpleTextWatcher { renderApps() })
@@ -94,7 +94,7 @@ class MainActivity : Activity() {
         status.text = "AI is planning…"
         scope.launch {
             val provider = OpenAiCompatibleProvider(settings.endpoint, settings.apiKey, settings.model)
-            val state = "theme=${engine.theme()}, layout=${engine.layout()}, hidden=${engine.hiddenPackages()}"
+            val state = "theme=" + engine.theme() + ", layout=" + engine.layout() + ", hidden=" + engine.hiddenPackages()
             provider.generatePlan(command,state).onSuccess { json -> engine.applyJson(json).onSuccess { n -> status.text = "Applied $n action(s)"; root.setBackgroundColor(themeColor()); renderApps() }.onFailure { status.text = "Plan rejected: ${it.message}" } }.onFailure { status.text = "AI error: ${it.message}" }
         }
     }
