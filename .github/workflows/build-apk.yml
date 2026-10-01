@@ -45,26 +45,63 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug --stacktrace
 
-      - name: Build release APK
-        run: gradle --no-daemon :app:assembleRelease --stacktrace
-
-      - name: Verify ARMv7a-only APKs
+      - name: Verify debug APK is ARMv7a-only
         shell: bash
         run: |
           set -euo pipefail
-          for APK in app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/release/app-release.apk; do
-            test -f "$APK"
-            echo "APK: $APK"
-            ls -lh "$APK"
-            python3 -c 'import sys,zipfile; apk=sys.argv[1]; z=zipfile.ZipFile(apk); libs=[n for n in z.namelist() if n.startswith("lib/") and n.endswith(".so")]; print("Native libraries:", libs); assert libs, "FAIL: no native library; ARMv7a guard is missing"; bad=[n for n in libs if not n.startswith("lib/armeabi-v7a/")]; assert not bad, "FAIL: non-ARMv7 native libraries: "+", ".join(bad); print("PASS: only armeabi-v7a native code is packaged.")' "$APK"
-          done
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          ls -lh "$APK"
+          python3 - "$APK" <<'PY'
+          import sys, zipfile
+          apk = sys.argv[1]
+          with zipfile.ZipFile(apk) as z:
+              libs = [n for n in z.namelist() if n.startswith("lib/") and n.endswith(".so")]
+          print("Native libraries:", libs)
+          if not libs:
+              raise SystemExit("FAIL: no native library; ARMv7a guard is missing")
+          bad = [n for n in libs if not n.startswith("lib/armeabi-v7a/")]
+          if bad:
+              raise SystemExit("FAIL: non-ARMv7 native libraries: " + ", ".join(bad))
+          print("PASS: debug APK contains only armeabi-v7a native code.")
+          PY
 
-      - name: Upload APKs
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: ai-control-launcher-armv7a-apks
-          path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/release/app-release.apk
+          name: ai-control-launcher-debug-armv7a
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Build release APK
+        run: gradle --no-daemon :app:assembleRelease --stacktrace
+
+      - name: Verify release APK is ARMv7a-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          ls -lh "$APK"
+          python3 - "$APK" <<'PY'
+          import sys, zipfile
+          apk = sys.argv[1]
+          with zipfile.ZipFile(apk) as z:
+              libs = [n for n in z.namelist() if n.startswith("lib/") and n.endswith(".so")]
+          print("Native libraries:", libs)
+          if not libs:
+              raise SystemExit("FAIL: no native library; ARMv7a guard is missing")
+          bad = [n for n in libs if not n.startswith("lib/armeabi-v7a/")]
+          if bad:
+              raise SystemExit("FAIL: non-ARMv7 native libraries: " + ", ".join(bad))
+          print("PASS: release APK contains only armeabi-v7a native code.")
+          PY
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-control-launcher-release-armv7a
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
