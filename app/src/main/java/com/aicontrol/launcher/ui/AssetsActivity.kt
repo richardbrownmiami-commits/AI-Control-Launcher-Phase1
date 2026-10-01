@@ -43,6 +43,7 @@ class AssetsActivity : Activity() {
         section("Icon overrides",catalog.listIconOverrides(),false)
         section("Icon packs",catalog.listIconPacks(),true)
         section("Custom themes",catalog.listThemes(),false)
+        section("Styles",catalog.listStyles(),false)
     }
 
     private fun section(title:String,files:List<File>,canApply:Boolean) {
@@ -70,6 +71,7 @@ class AssetsActivity : Activity() {
                         "Images"->catalog.deleteImage(file.name)
                         "Icon overrides"->catalog.deleteIconOverride(file.name)
                         "Icon packs"->catalog.deleteIconPack(file.name)
+                        "Styles"->catalog.deleteStyle(file.name)
                         else->catalog.deleteTheme(file.name)
                     }
                     if(!ok) Toast.makeText(this@AssetsActivity,"Delete failed",Toast.LENGTH_SHORT).show()
