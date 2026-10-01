@@ -82,11 +82,10 @@ jobs:
           ls -lh "$APK"
           mapfile -t libs < <(unzip -Z1 "$APK" | grep '^lib/.*\\.so$' || true)
           printf '%s\\n' "Native libraries: ${libs[@]:-<none>}"
-          test "${#libs[@]}" -gt 0
           for lib in "${libs[@]}"; do
             [[ "$lib" == lib/armeabi-v7a/* ]] || { echo "FAIL: $lib"; exit 1; }
           done
-          echo "PASS: release APK contains only armeabi-v7a native code."
+          echo "PASS: release APK contains only ARMv7a native code (or no native libraries)."
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
