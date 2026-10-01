@@ -59,7 +59,7 @@ class MainActivity:Activity(){
             text="Theme"
             setOnClickListener{
                 val next=if(engine.theme()=="default")"midnight"else"default"
-                engine.applyJson("{"actions":[{"action":"SET_THEME","theme":""+next+""}]}")
+                engine.applyJson("{\\\"actions\\\":[{\\\"action\\\":\\\"SET_THEME\\\",\\\"theme\\\":\\\""+next+"\\\"}]}")
                 root.setBackgroundColor(engine.themeBackground()); updateStatus()
             }
         })
