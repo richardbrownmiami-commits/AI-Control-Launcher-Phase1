@@ -13,7 +13,7 @@ fun createProvider(settings: SettingsStore): AiProvider =
     else OpenRouterProvider(settings.model, settings.openRouterKey)
 
 private fun cleanJson(text: String): String {
-    val fence = "```"
+    val fence = "\u0060\u0060\u0060"
     return text.trim().removePrefix(fence + "json").removePrefix(fence).removeSuffix(fence).trim()
 }
 
@@ -26,8 +26,7 @@ class OpenRouterProvider(private val model: String, private val apiKey: String) 
                 put("temperature", 0.2)
                 put("messages", JSONArray()
                     .put(JSONObject().put("role", "system").put("content", AiPlanner.SYSTEM_PROMPT))
-                    .put(JSONObject().put("role", "user").put("content", "Command: " + userCommand + "
-State: " + launcherState)))
+                    .put(JSONObject().put("role", "user").put("content", "Command: " + userCommand + "\\nState: " + launcherState)))
             }.toString()
             val conn = (URL("https://openrouter.ai/api/v1/chat/completions").openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"; connectTimeout = 15000; readTimeout = 30000; doOutput = true
@@ -50,9 +49,7 @@ class GeminiProvider(private val model: String, private val apiKey: String) : Ai
             require(apiKey.isNotBlank()) { "Gemini API key is empty" }
             val body = JSONObject().apply {
                 put("contents", JSONArray().put(JSONObject().put("parts", JSONArray().put(
-                    JSONObject().put("text", AiPlanner.SYSTEM_PROMPT + "
-Command: " + userCommand + "
-State: " + launcherState)
+                    JSONObject().put("text", AiPlanner.SYSTEM_PROMPT + "\\nCommand: " + userCommand + "\\nState: " + launcherState)
                 ))))
             }.toString()
             val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + apiKey
