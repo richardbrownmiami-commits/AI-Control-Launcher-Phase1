@@ -1,19 +1,63 @@
 name: Build ARMv7a Android 11 APK
-on: [push, workflow_dispatch]
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: "27.0.12077973"
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '17' }
-      - uses: android-actions/setup-android@v3
-      - run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
-      - run: yes | sdkmanager --licenses || true
-      - run: ./gradlew assembleDebug --stacktrace
-      - name: Verify no arm64 native libs
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
+          cmdline-tools-version: "12266719"
+          accept-android-sdk-licenses: true
+
+      - name: Install Android SDK and reference NDK
         run: |
-          APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
-          if unzip -l "$APK" | grep -q 'lib/arm64-v8a/'; then exit 1; fi
-      - uses: actions/upload-artifact@v4
-        with: { name: ai-control-launcher-armv7-phase1, path: app/build/outputs/apk/debug/*.apk }
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;${NDK_VERSION}"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Build release APK
+        run: gradle --no-daemon :app:assembleRelease --stacktrace
+
+      - name: Verify APK
+        run: |
+          set -e
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          if unzip -l "$APK" | grep -E "lib/(arm64-v8a|x86|x86_64)/"; then
+            echo "FAIL: unsupported 64-bit/x86 native library detected"
+            exit 1
+          fi
+          echo "APK verification passed."
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-control-launcher-phase1-armv7
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
