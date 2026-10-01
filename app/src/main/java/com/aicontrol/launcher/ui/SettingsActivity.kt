@@ -38,7 +38,7 @@ class SettingsActivity : Activity() {
         models=Spinner(this)
         root.addView(models)
         root.addView(TextView(this).apply {
-            text="Free models only.\nOpenRouter keys: openrouter.ai/keys\nGemini keys: aistudio.google.com"
+            text="Free models only.\\nOpenRouter keys: openrouter.ai/keys\\nGemini keys: aistudio.google.com"
             setTextColor(Color.LTGRAY); setPadding(0,8,0,12)
         })
         openKey=keyField("OpenRouter API key")
