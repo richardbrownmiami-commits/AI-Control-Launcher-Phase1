@@ -5,17 +5,17 @@ plugins {
 
 android {
     namespace = "com.aicontrol.launcher"
-    compileSdk = 34
+    compileSdk = 35
     defaultConfig {
         applicationId = "com.aicontrol.launcher"
         minSdk = 30
         targetSdk = 30
         versionCode = 2
         versionName = "0.2.0-phase1"
-        ndk { abiFilters += "armeabi-v7a" }
+        ndk { abiFilters += listOf("armeabi-v7a") }
     }
     buildTypes {
-        release { isMinifyEnabled = false }
+        release { isMinifyEnabled = false; isDebuggable = false }
         debug { isMinifyEnabled = false }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
