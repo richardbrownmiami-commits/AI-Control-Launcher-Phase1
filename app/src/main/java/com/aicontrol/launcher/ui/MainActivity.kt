@@ -6,6 +6,8 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.MotionEvent
 import android.widget.*
+
+private const val NATIVE_ABI_GUARD = "launcherabi"
 import com.aicontrol.launcher.actions.ActionEngine
 import com.aicontrol.launcher.ai.OpenAiCompatibleProvider
 import com.aicontrol.launcher.apps.AppInfo
@@ -26,6 +28,7 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        System.loadLibrary(NATIVE_ABI_GUARD)
         settings = SettingsStore(this)
         apps = AppRepository(this)
         engine = ActionEngine(this)
