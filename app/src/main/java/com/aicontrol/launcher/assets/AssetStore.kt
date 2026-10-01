@@ -11,6 +11,7 @@ class AssetStore(context: Context) {
     val cache = File(root, "cache").apply { mkdirs() }
     val iconPacks = File(root, "icon-packs").apply { mkdirs() }
     val themes = File(root, "themes").apply { mkdirs() }
+    val styles = File(root, "styles").apply { mkdirs() }
     fun wallpaper(name: String) = safeFile(wallpapers, name)
     fun icon(packageName: String) = safeFile(icons, packageName + ".png")
     fun image(name: String) = safeFile(images, name)
