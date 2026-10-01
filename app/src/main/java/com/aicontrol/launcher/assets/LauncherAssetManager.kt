@@ -32,6 +32,30 @@ class LauncherAssetManager(private val context: Context) {
     fun iconDrawable(packageName: String): Drawable? = iconOverride(packageName)?.let { Drawable.createFromPath(it.absolutePath) }
     fun clearIconOverride(packageName: String) { store.icon(packageName).delete() }
 
+    fun clearIconPack(name: String): Result<Unit> = runCatching {
+        val dir = File(store.iconPacks, name)
+        if (dir.exists()) dir.deleteRecursively()
+    }
+
+    fun clearAllIconOverrides() {
+        store.icons.listFiles()?.forEach { if (it.isFile) it.delete() }
+    }
+
+    fun deleteAsset(type: String, name: String): Result<Unit> = runCatching {
+        val safe = name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+        val target = when (type.lowercase()) {
+            "wallpaper" -> store.wallpaper(safe)
+            "image" -> store.image(safe)
+            "icon" -> store.icon(safe.removeSuffix(".png"))
+            "icon_pack" -> File(store.iconPacks, safe)
+            "theme" -> store.themeFile(safe.removeSuffix(".json"))
+            "style" -> File(store.root, "styles/$safe")
+            else -> error("Unknown asset type")
+        }
+        require(target.canonicalPath.startsWith(store.root.canonicalPath + File.separator)) { "Invalid asset path" }
+        if (target.exists()) require(target.deleteRecursively()) { "Unable to delete asset" }
+    }
+
     fun createIconPack(name: String, icons: List<Pair<String, String>>): Result<File> = runCatching {
         val dir = store.iconPackDir(name)
         val manifest = JSONObject().put("name", name).put("icons", JSONArray())
