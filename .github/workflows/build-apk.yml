@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NDK_VERSION: "27.0.12077973"
+      CMAKE_VERSION: "3.31.6"
 
     steps:
       - name: Checkout
@@ -31,61 +32,45 @@ jobs:
           cmdline-tools-version: "12266719"
           accept-android-sdk-licenses: true
 
-      - name: Install Android SDK and NDK
+      - name: Install Android SDK, NDK and CMake
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;${NDK_VERSION}"
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;$NDK_VERSION" "cmake;$CMAKE_VERSION"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
-      - name: Build debug APK
-        run: gradle --no-daemon :app:assembleDebug --stacktrace
-
-      - name: Build release APK
+      - name: Build ARMv7a release APK only
         run: gradle --no-daemon :app:assembleRelease --stacktrace
 
-      - name: Verify APK outputs
+      - name: Verify ARMv7a-only APK
         run: |
-          set -e
-          DEBUG_APK="app/build/outputs/apk/debug/app-debug.apk"
-          RELEASE_APK="app/build/outputs/apk/release/app-release.apk"
-
-          test -f "$DEBUG_APK"
-          test -f "$RELEASE_APK"
-
-          ls -lh "$DEBUG_APK" "$RELEASE_APK"
-
-          python3 - "$DEBUG_APK" "$RELEASE_APK" <<'PY'
-          import sys
-          import zipfile
-
-          for apk_path in sys.argv[1:]:
-              with zipfile.ZipFile(apk_path) as z:
-                  native = [
-                      n for n in z.namelist()
-                      if n.startswith("lib/") and n.endswith(".so")
-                  ]
-              unsupported = [
-                  n for n in native
-                  if not n.startswith("lib/armeabi-v7a/")
-              ]
-              print(f"{apk_path}: native libraries = {native}")
-              if unsupported:
-                  print(f"FAIL: unsupported native ABI entries: {unsupported}")
-                  raise SystemExit(1)
-
-          print("APK verification passed: no arm64-v8a/x86/x86_64 native libraries.")
-          print("This launcher is pure Kotlin/Java and may contain no native .so files.")
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          ls -lh "$APK"
+          python3 - "$APK" <<'PY'
+          import sys, zipfile
+          apk = sys.argv[1]
+          with zipfile.ZipFile(apk) as z:
+              libs = [n for n in z.namelist() if n.startswith("lib/") and n.endswith(".so")]
+          print("Native libraries:")
+          for lib in libs:
+              print("  " + lib)
+          required = [n for n in libs if n.startswith("lib/armeabi-v7a/")]
+          forbidden = [n for n in libs if not n.startswith("lib/armeabi-v7a/")]
+          if not required:
+              raise SystemExit("FAIL: no armeabi-v7a native library")
+          if forbidden:
+              raise SystemExit("FAIL: non-ARMv7 native libraries: " + ", ".join(forbidden))
+          print("PASS: only lib/armeabi-v7a native code is packaged.")
           PY
 
-      - name: Upload APKs
+      - name: Upload ARMv7a APK
         uses: actions/upload-artifact@v4
         with:
-          name: ai-control-launcher-phase1-armv7-apks
-          path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            app/build/outputs/apk/release/app-release.apk
+          name: ai-control-launcher-armv7a-android11
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
