@@ -20,9 +20,10 @@ class LauncherAssetManager(private val context: Context) {
         val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: error("Invalid wallpaper image")
         WallpaperManager.getInstance(context).setBitmap(bitmap)
         bitmap.recycle()
+        context.getSharedPreferences("launcher_state", Context.MODE_PRIVATE).edit().putString("active_wallpaper", file.name).apply()
     }
 
-    fun downloadImage(url: String, name: String): Result<File> =
+    fun activeWallpaper(): File? = store.wallpaper(context.getSharedPreferences("launcher_state", Context.MODE_PRIVATE).getString("active_wallpaper", "") ?: "").takeIf { it.isFile }\n\n    fun downloadImage(url: String, name: String): Result<File> =
         downloader.download(url, store.image(name)).map { it.file }
 
     fun downloadIcon(url: String, packageName: String): Result<File> =
