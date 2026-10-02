@@ -9,12 +9,12 @@ android {
     ndkVersion = "27.0.12077973"
     defaultConfig {
         applicationId = "com.aicontrol.launcher"
-        minSdk = 30
-        targetSdk = 30
-        versionCode = 2
-        versionName = "0.2.0-phase1"
+        minSdk = 28
+        targetSdk = 35
+        versionCode = 3
+        versionName = "0.3.0-launcher"
         ndk { abiFilters += listOf("armeabi-v7a") }
-        externalNativeBuild { cmake { arguments += listOf("-DANDROID_PLATFORM=android-30") } }
+        externalNativeBuild { cmake { arguments += listOf("-DANDROID_PLATFORM=android-28") } }
     }
     externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.31.6" } }
 
