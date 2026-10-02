@@ -74,4 +74,26 @@ object ThemeSpec {
             style = normalizedStyle
         )
     }
+
+    /** A simple offline palette hint; this chooses colors only and never supplies character art. */
+    fun suggestedPalette(name: String): Values {
+        val normalized = name.trim().lowercase()
+        return when {
+            "spider" in normalized || "web hero" in normalized -> validate(
+                name, "#0B1020", "#E62429", "#1E5AA8", "#14213D", "neon"
+            )
+            else -> validate(name)
+        }
+    }
+
+    /** Search only for a matching abstract palette, not copyrighted character imagery. */
+    fun suggestedWallpaperQuery(name: String): String {
+        val normalized = name.lowercase()
+        return when {
+            "spider" in normalized || "web hero" in normalized -> "abstract red blue geometric wallpaper"
+            "ocean" in normalized -> "abstract ocean blue gradient wallpaper"
+            "ember" in normalized -> "abstract orange red gradient wallpaper"
+            else -> "abstract colorful geometric wallpaper"
+        }
+    }
 }

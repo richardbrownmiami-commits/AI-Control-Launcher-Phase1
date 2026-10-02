@@ -2,7 +2,6 @@ package com.aicontrol.launcher.assets
 
 import android.app.WallpaperManager
 import android.content.Context
-import android.graphics.BitmapFactory
 import android.graphics.drawable.Drawable
 import java.io.File
 import org.json.JSONArray
@@ -10,16 +9,49 @@ import org.json.JSONObject
 
 class LauncherAssetManager(private val context: Context) {
     private val store = AssetStore(context)
+    private val attributions = AssetAttributionStore(context)
     val downloader = ImageDownloader()
 
     fun downloadWallpaper(url: String, name: String = "current"): Result<File> =
         downloader.download(url, store.wallpaper(name)).map { it.file }
 
+    fun downloadLicensedWallpaper(candidate: WallpaperCandidate): Result<File> = runCatching {
+        require(AssetLicensePolicy.isReusable(candidate.license)) { "This wallpaper's license is not approved for reuse." }
+        require(candidate.imageUrl.startsWith("https://upload.wikimedia.org/wikipedia/commons/")) {
+            "Wallpaper image must come from Wikimedia Commons."
+        }
+        val base = candidate.title.substringAfterLast('/').substringBeforeLast('.')
+            .replace(Regex("[^A-Za-z0-9_-]"), "_").take(60).ifBlank { "commons_wallpaper" }
+        val extension = candidate.imageUrl.substringBefore('?').substringAfterLast('.', "jpg")
+            .lowercase().takeIf { it in setOf("jpg", "jpeg", "png", "webp") } ?: "jpg"
+        val file = store.wallpaper("${base}_${System.currentTimeMillis()}.$extension")
+        val downloaded = downloader.download(candidate.imageUrl, file).getOrThrow().file
+        attributions.record(AssetAttribution(
+            type = "wallpaper", name = downloaded.name, title = candidate.title,
+            creator = candidate.creator, license = candidate.license,
+            licenseUrl = candidate.licenseUrl, sourceUrl = candidate.pageUrl
+        ))
+        downloaded
+    }
+
+    /** Applies only inside this launcher; the system-wide wallpaper is left unchanged. */
+    fun setLauncherWallpaper(file: File): Result<Unit> = runCatching {
+        require(file.isFile && file.canonicalPath.startsWith(store.wallpapers.canonicalPath + File.separator)) {
+            "Choose a wallpaper stored in this launcher's private asset library."
+        }
+        ImageAssetValidation.validate(file)
+        context.getSharedPreferences("launcher_state", Context.MODE_PRIVATE)
+            .edit().putString("active_wallpaper", file.name).apply()
+    }
+
     fun applyWallpaper(file: File): Result<Unit> = runCatching {
         require(file.exists()) { "Wallpaper file not found" }
-        val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: error("Invalid wallpaper image")
-        WallpaperManager.getInstance(context).setBitmap(bitmap)
-        bitmap.recycle()
+        val bitmap = ImageAssetValidation.decodeSampled(file, 4096) ?: error("Invalid wallpaper image")
+        try {
+            WallpaperManager.getInstance(context).setBitmap(bitmap)
+        } finally {
+            bitmap.recycle()
+        }
         context.getSharedPreferences("launcher_state", Context.MODE_PRIVATE).edit().putString("active_wallpaper", file.name).apply()
     }
 

@@ -1,6 +1,5 @@
 package com.aicontrol.launcher.assets
 
-import android.graphics.BitmapFactory
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -41,9 +40,7 @@ class ImageDownloader {
                 }
             }
 
-            require(BitmapFactory.decodeFile(destination.absolutePath) != null) {
-                "Downloaded file is not a valid image"
-            }
+            ImageAssetValidation.validate(destination)
 
             DownloadResult(destination, mime, destination.length())
         } finally {

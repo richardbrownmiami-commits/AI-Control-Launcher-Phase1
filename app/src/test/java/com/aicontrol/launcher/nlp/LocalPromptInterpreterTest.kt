@@ -27,6 +27,16 @@ class LocalPromptInterpreterTest {
         assertEquals("#46D2FF", command.values.accent)
     }
 
+    @Test fun createsNamedThemeFromShortConversationalRequest() {
+        val result = LocalPromptInterpreter.interpret("Make a Spider-Man theme", apps, themes)
+        assertTrue(result is PromptInterpretation.Ready)
+        val values = (result as PromptInterpretation.Ready).command.let { (it as LauncherCommand.CreateTheme).values }
+        assertEquals("Spider-Man", values.name)
+        assertEquals("#E62429", values.accent)
+        assertEquals("#1E5AA8", values.accent2)
+        assertEquals("neon", values.style)
+    }
+
     @Test fun resolvesPresetThemeWithoutCreatingAFile() {
         val result = LocalPromptInterpreter.interpret("Make a midnight theme", apps, themes)
         assertTrue(result is PromptInterpretation.Ready)

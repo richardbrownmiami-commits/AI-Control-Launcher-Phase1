@@ -2,17 +2,20 @@ package com.aicontrol.launcher.ui
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.appwidget.AppWidgetHost
+import android.appwidget.AppWidgetManager
 import android.content.Intent
-import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.os.Bundle
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.View
 import android.widget.*
 import com.aicontrol.launcher.actions.ActionEngine
 import com.aicontrol.launcher.apps.AppInfo
 import com.aicontrol.launcher.apps.AppRepository
 import com.aicontrol.launcher.assets.LauncherAssetManager
+import com.aicontrol.launcher.assets.ImageAssetValidation
 import com.aicontrol.launcher.icons.IconPackManager
 import com.aicontrol.launcher.nlp.AppTarget
 import com.aicontrol.launcher.nlp.LauncherCommand
@@ -21,6 +24,9 @@ import com.aicontrol.launcher.nlp.PromptInterpretation
 import java.util.Locale
 
 private const val NATIVE_ABI_GUARD = "launcherabi"
+private const val WIDGET_HOST_ID = 7421
+private const val REQUEST_PICK_WIDGET = 6301
+private const val REQUEST_CONFIGURE_WIDGET = 6302
 
 class MainActivity : Activity() {
     private lateinit var apps: AppRepository
@@ -33,6 +39,10 @@ class MainActivity : Activity() {
     private lateinit var search: EditText
     private lateinit var commandInput: EditText
     private lateinit var dock: LinearLayout
+    private lateinit var widgetManager: AppWidgetManager
+    private lateinit var widgetHost: AppWidgetHost
+    private lateinit var widgetContainer: LinearLayout
+    private var pendingWidgetId = -1
     private var downY = 0f
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
@@ -43,15 +53,23 @@ class MainActivity : Activity() {
         engine = ActionEngine(this)
         assets = LauncherAssetManager(this)
         iconPacks = IconPackManager(this)
+        widgetManager = getSystemService(AppWidgetManager::class.java)
+        widgetHost = AppWidgetHost(this, WIDGET_HOST_ID)
         buildUi()
     }
 
     override fun onResume() {
         super.onResume()
         if (::content.isInitialized) {
+            runCatching { widgetHost.startListening() }
             UiTheme.bind(engine)
             render()
         }
+    }
+
+    override fun onPause() {
+        if (::widgetHost.isInitialized) runCatching { widgetHost.stopListening() }
+        super.onPause()
     }
 
     private fun buildUi() {
@@ -60,7 +78,7 @@ class MainActivity : Activity() {
 
         val wallpaper = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            assets.activeWallpaper()?.let { setImageBitmap(BitmapFactory.decodeFile(it.absolutePath)) }
+            assets.activeWallpaper()?.let { setImageBitmap(ImageAssetValidation.decodeSampled(it, 2048)) }
         }
         root.addView(wallpaper, FrameLayout.LayoutParams(-1, -1))
 
@@ -85,11 +103,12 @@ class MainActivity : Activity() {
         top.addView(actionButton("Menu") {
             AlertDialog.Builder(this@MainActivity)
                 .setTitle("Launcher")
-                .setItems(arrayOf("Customize launcher", "Assets", "AI connection settings (test only)")) { _, which ->
+                .setItems(arrayOf("Customize launcher", "Assets", "Add Android widget", "AI connection settings (test only)")) { _, which ->
                     when (which) {
                         0 -> startActivity(Intent(this@MainActivity, LauncherSettingsActivity::class.java))
                         1 -> startActivity(Intent(this@MainActivity, AssetsActivity::class.java))
-                        2 -> startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
+                        2 -> addAndroidWidget()
+                        3 -> startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
                     }
                 }
                 .show()
@@ -137,6 +156,18 @@ class MainActivity : Activity() {
             setPadding(dp(4), 0, 0, dp(8))
         })
 
+        val widgetHeader = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        widgetHeader.addView(TextView(this).apply {
+            text = "WIDGETS"
+            textSize = 10f
+            setTextColor(UiTheme.accent)
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+        })
+        widgetHeader.addView(actionButton("+ Add") { addAndroidWidget() })
+        content.addView(widgetHeader, LinearLayout.LayoutParams(-1, dp(38)))
+        widgetContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(widgetContainer, LinearLayout.LayoutParams(-1, -2))
+
         search = EditText(this).apply {
             hint = "Search apps"
             setSingleLine()
@@ -168,14 +199,17 @@ class MainActivity : Activity() {
         }
         content.addView(dock, LinearLayout.LayoutParams(-1, dp(68)).apply { topMargin = dp(8) })
 
-        root.setOnTouchListener { _, event ->
+        root.setOnClickListener {
+            search.requestFocus()
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+            imm.showSoftInput(search, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        }
+        root.setOnTouchListener { view, event ->
             if (event.action == MotionEvent.ACTION_DOWN) downY = event.y
             if (event.action == MotionEvent.ACTION_UP && downY - event.y > dp(100)) {
-                search.requestFocus()
-                val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
-                imm.showSoftInput(search, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
-            }
-            false
+                view.performClick()
+                true
+            } else false
         }
 
         setContentView(root)
@@ -216,29 +250,32 @@ class MainActivity : Activity() {
     private fun reviewPrompt(result: PromptInterpretation.Ready, installed: List<AppInfo>) {
         val command = result.command
         val isLaunch = command is LauncherCommand.LaunchApp
-        AlertDialog.Builder(this)
-            .setTitle("Review command")
-            .setMessage(result.preview)
+        val builder = AlertDialog.Builder(this).setTitle(
+            if (command is LauncherCommand.CreateTheme) "Preview ${command.values.name}" else "Review command"
+        )
+        if (command is LauncherCommand.CreateTheme) {
+            builder.setView(themePreview(command.values))
+            builder.setNeutralButton("Apply + find wallpaper") { _, _ ->
+                try {
+                    saveTheme(command.values)
+                    commandInput.text.clear()
+                    render()
+                    startActivity(Intent(this, AssetsActivity::class.java).putExtra(
+                        AssetsActivity.EXTRA_SUGGESTED_QUERY,
+                        com.aicontrol.launcher.theme.ThemeSpec.suggestedWallpaperQuery(command.values.name)
+                    ))
+                } catch (error: Exception) {
+                    Toast.makeText(this, error.message ?: "Unable to apply theme", Toast.LENGTH_LONG).show()
+                }
+            }
+        } else builder.setMessage(result.preview)
+        builder
             .setNegativeButton("Cancel", null)
             .setPositiveButton(if (isLaunch) "Open" else "Apply") { _, _ ->
                 try {
                     when (command) {
                         is LauncherCommand.ApplyTheme -> engine.setTheme(command.name)
-                        is LauncherCommand.CreateTheme -> engine.applyJson(
-                            org.json.JSONObject().put(
-                                "actions",
-                                org.json.JSONArray().put(
-                                    org.json.JSONObject()
-                                        .put("action", "CREATE_THEME")
-                                        .put("name", command.values.name)
-                                        .put("bg", command.values.background)
-                                        .put("accent", command.values.accent)
-                                        .put("accent2", command.values.accent2)
-                                        .put("card", command.values.card)
-                                        .put("style", command.values.style)
-                                )
-                            ).toString()
-                        ).getOrThrow()
+                        is LauncherCommand.CreateTheme -> saveTheme(command.values)
                         is LauncherCommand.SetLayout -> engine.setLayout(command.name)
                         is LauncherCommand.SetStyle -> engine.setStyle(command.name)
                         is LauncherCommand.SetAppVisible -> engine.setAppVisible(command.app.packageName, command.visible)
@@ -258,16 +295,206 @@ class MainActivity : Activity() {
             .show()
     }
 
+    private fun themePreview(values: com.aicontrol.launcher.theme.ThemeSpec.Values): LinearLayout {
+        val background = Color.parseColor(values.background)
+        val accent = Color.parseColor(values.accent)
+        val accent2 = Color.parseColor(values.accent2)
+        val card = Color.parseColor(values.card)
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+            this.background = UiTheme.rounded(background, 22f, accent, 1)
+            addView(TextView(this@MainActivity).apply {
+                text = "${values.name}  ·  ${values.style.uppercase(Locale.getDefault())}"
+                textSize = 18f
+                setTextColor(Color.WHITE)
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = "Offline palette preview. Optional wallpaper art can be imported or found under an open license."
+                textSize = 11f
+                setTextColor(Color.LTGRAY)
+                setPadding(0, dp(3), 0, dp(12))
+            })
+            val samples = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.HORIZONTAL }
+            listOf("Accent" to accent, "Secondary" to accent2, "Cards" to card).forEach { (label, color) ->
+                samples.addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(4), dp(4), dp(4), dp(4))
+                    addView(View(this@MainActivity).apply {
+                        setBackgroundColor(color)
+                        layoutParams = LinearLayout.LayoutParams(-1, dp(38))
+                    })
+                    addView(TextView(this@MainActivity).apply {
+                        text = label
+                        textSize = 10f
+                        setTextColor(Color.WHITE)
+                    })
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+            }
+            addView(samples)
+            addView(TextView(this@MainActivity).apply {
+                text = "Background ${values.background} · Accent ${values.accent}\nSecondary ${values.accent2} · Card ${values.card}"
+                textSize = 10f
+                setTextColor(Color.LTGRAY)
+                setPadding(dp(4), dp(2), dp(4), 0)
+            })
+            addView(LinearLayout(this@MainActivity).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(10), dp(8), dp(10), dp(8))
+                this.background = UiTheme.rounded(card, 14f, accent, 1)
+                addView(View(this@MainActivity).apply {
+                    setBackgroundColor(accent)
+                    layoutParams = LinearLayout.LayoutParams(dp(30), dp(30))
+                })
+                addView(TextView(this@MainActivity).apply {
+                    text = "  App icons     Search     Dock"
+                    textSize = 12f
+                    setTextColor(Color.WHITE)
+                })
+            }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
+        }
+    }
+
+    private fun saveTheme(values: com.aicontrol.launcher.theme.ThemeSpec.Values) {
+        engine.applyJson(
+            org.json.JSONObject().put("actions", org.json.JSONArray().put(
+                org.json.JSONObject()
+                    .put("action", "CREATE_THEME")
+                    .put("name", values.name)
+                    .put("bg", values.background)
+                    .put("accent", values.accent)
+                    .put("accent2", values.accent2)
+                    .put("card", values.card)
+                    .put("style", values.style)
+            )).toString()
+        ).getOrThrow()
+    }
+
     private fun render() {
         UiTheme.bind(engine)
         (root.getChildAt(0) as? ImageView)?.setImageBitmap(
-            assets.activeWallpaper()?.let { BitmapFactory.decodeFile(it.absolutePath) }
+            assets.activeWallpaper()?.let { ImageAssetValidation.decodeSampled(it, 2048) }
         )
         (root.getChildAt(1) as? FrameLayout)?.setBackgroundColor(
             Color.argb(150, Color.red(UiTheme.bg), Color.green(UiTheme.bg), Color.blue(UiTheme.bg))
         )
         renderApps()
         renderDock()
+        renderWidgets()
+    }
+
+    private fun addAndroidWidget() {
+        pendingWidgetId = widgetHost.allocateAppWidgetId()
+        try {
+            startActivityForResult(
+                Intent(AppWidgetManager.ACTION_APPWIDGET_PICK)
+                    .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId),
+                REQUEST_PICK_WIDGET
+            )
+        } catch (error: Exception) {
+            widgetHost.deleteAppWidgetId(pendingWidgetId)
+            pendingWidgetId = -1
+            Toast.makeText(this, "Android widget picker is unavailable", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    @Deprecated("System widget picker result API is retained for this API-30-only launcher.")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_PICK_WIDGET) {
+            val id = data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, pendingWidgetId) ?: pendingWidgetId
+            if (resultCode != RESULT_OK || id < 0) {
+                if (pendingWidgetId >= 0) widgetHost.deleteAppWidgetId(pendingWidgetId)
+                pendingWidgetId = -1
+                return
+            }
+            pendingWidgetId = id
+            val info = widgetManager.getAppWidgetInfo(id)
+            if (info == null) {
+                widgetHost.deleteAppWidgetId(id)
+                pendingWidgetId = -1
+                Toast.makeText(this, "The selected widget is no longer available", Toast.LENGTH_LONG).show()
+                return
+            }
+            if (info.configure != null) {
+                try {
+                    startActivityForResult(
+                        Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE)
+                            .setComponent(info.configure)
+                            .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id),
+                        REQUEST_CONFIGURE_WIDGET
+                    )
+                } catch (error: Exception) {
+                    widgetHost.deleteAppWidgetId(id)
+                    pendingWidgetId = -1
+                    Toast.makeText(this, "Widget configuration could not be opened", Toast.LENGTH_LONG).show()
+                }
+            } else finishAddingWidget(id)
+            return
+        }
+        if (requestCode == REQUEST_CONFIGURE_WIDGET) {
+            val id = pendingWidgetId
+            if (resultCode == RESULT_OK && id >= 0) finishAddingWidget(id)
+            else if (id >= 0) widgetHost.deleteAppWidgetId(id)
+            pendingWidgetId = -1
+        }
+    }
+
+    private fun finishAddingWidget(id: Int) {
+        val values = widgetIds().toMutableSet().apply { add(id) }
+        getSharedPreferences("launcher_state", MODE_PRIVATE).edit()
+            .putStringSet("app_widget_ids", values.map { it.toString() }.toSet()).apply()
+        pendingWidgetId = -1
+        renderWidgets()
+        Toast.makeText(this, "Widget added", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun widgetIds(): Set<Int> = getSharedPreferences("launcher_state", MODE_PRIVATE)
+        .getStringSet("app_widget_ids", emptySet())?.mapNotNull { it.toIntOrNull() }?.toSet() ?: emptySet()
+
+    private fun renderWidgets() {
+        if (!::widgetContainer.isInitialized || !::widgetHost.isInitialized || !::widgetManager.isInitialized) return
+        widgetContainer.removeAllViews()
+        val ids = widgetIds().sorted()
+        widgetContainer.visibility = if (ids.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
+        ids.forEach { id ->
+            val info = widgetManager.getAppWidgetInfo(id) ?: return@forEach
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(8), dp(4), dp(8), dp(6))
+                UiTheme.styleCard(this, UiTheme.card, true)
+            }
+            val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+            header.addView(TextView(this).apply {
+                text = info.loadLabel(packageManager)
+                textSize = 11f
+                setTextColor(UiTheme.textMuted)
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+            })
+            header.addView(actionButton("Remove") { confirmRemoveWidget(id, info.loadLabel(packageManager).toString()) })
+            card.addView(header)
+            val hostView = widgetHost.createView(this, id, info).apply {
+                setAppWidget(id, info)
+                contentDescription = "${info.loadLabel(packageManager)} home-screen widget"
+            }
+            card.addView(hostView, LinearLayout.LayoutParams(-1, dp(info.minHeight.coerceAtLeast(72))))
+            widgetContainer.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+        }
+    }
+
+    private fun confirmRemoveWidget(id: Int, label: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Remove widget?")
+            .setMessage("Remove $label from this launcher's home screen?")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Remove") { _, _ ->
+                val remaining = widgetIds().toMutableSet().apply { remove(id) }
+                getSharedPreferences("launcher_state", MODE_PRIVATE).edit()
+                    .putStringSet("app_widget_ids", remaining.map { it.toString() }.toSet()).apply()
+                widgetHost.deleteAppWidgetId(id)
+                renderWidgets()
+            }
+            .show()
     }
 
     private fun renderApps() {

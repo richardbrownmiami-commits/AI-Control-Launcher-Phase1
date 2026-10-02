@@ -1,44 +1,42 @@
 # AI Control Launcher
 
-Android HOME launcher configured specifically for Android 11 (API 30) on 32-bit ARMv7a. The APK declares `minSdk=30`, `targetSdk=30`, and `maxSdkVersion=30`, and packages only `armeabi-v7a` native code.
+An Android HOME launcher targeted strictly at Android 11 / API 30 and 32-bit ARMv7a. Gradle sets `minSdk=30`, `targetSdk=30`, the manifest declares `maxSdkVersion=30`, and native packaging is restricted to `armeabi-v7a`.
 
 ## Current features
-- A local prompt command bar for creating/applying themes, changing grid layout/card style, hiding/restoring an app in this launcher, and opening an installed app. Parsing runs on-device, requires no API key, and previews every recognized command for confirmation.
-- Launcher settings for preset themes, layouts, styles, dock slots, labels, and installed ADW/Nova-compatible icon packs.
-- A private asset library at `context.filesDir/launcher-assets/` for downloaded wallpapers, images, icons, icon packs, themes, styles and cache. Assets can be browsed, applied or deleted from the Assets screen.
-- An image downloader that enforces HTTPS, image MIME and decoded-image validation, and a 10 MB size limit.
-- OpenRouter and Gemini provider code with a JSON action protocol and free/free-tier model lists. The current launcher prompt box does **not** send prompts to an external model; the provider settings screen is a connection tester only.
-- API keys are stored in app-private SharedPreferences in this prototype. Android Keystore-backed storage remains future work.
 
-## Local prompt examples
-The interpreter deliberately recognizes a bounded set of commands and asks for clarification if an app name is ambiguous. Examples:
-- `What can you do?`
-- `Create a theme called Ocean with blue background and cyan accent.`
-- `Make a midnight theme.`
-- `Set layout to dense.`
-- `Set card style to neon.`
-- `Hide Calculator.`
-- `Show Calculator.`
-- `Open Camera.`
+- **Guided offline theme helper:** the bounded on-device prompt parser understands requests such as `Make a Spider-Man theme`, explicit color prompts, built-in/custom theme selection, grid/card commands, and app hide/show/open. Each recognized change is reviewed before application. A custom palette is shown in an in-dialog visual preview before saving. The Spider-Man-named example selects a red/blue neon palette only; no character logo/art is generated or included.
+- **Wallpapers and image assets:** users can open Android's document picker and select an image from Downloads (or another document source); the selected file is validated and copied into app-private storage. The launcher can search Wikimedia Commons for reusable JPEG/PNG/WebP wallpaper on request. Only CC0, public-domain, CC BY, and CC BY-SA results pass the reuse filter; results show creator, license, and source before download, and attribution is retained in the private asset library. Unknown, NC, and ND licenses are rejected. Search requires network access and sends the entered search phrase to Wikimedia Commons; it uses no paid service.
+- **Wallpaper application:** applying an image as the launcher's background does not change Android's device wallpaper. The separate device-wallpaper option has an explicit confirmation.
+- **Widgets:** the HOME screen hosts installed Android app widgets using the platform `AppWidgetHost`; users pick/configure providers through Android's widget picker and can remove them from the launcher. A downloaded static icon/wallpaper pack does not provide an Android widget.
+- **Customization:** built-in and custom themes, grid layout, card style, labels, dock slots, compatible installed ADW/Nova-style icon packs, and local asset browsing. Custom themes also appear in the settings picker. Hide/show affects this launcher only.
+- **Private asset storage:** imported/downloaded assets are kept beneath `filesDir/launcher-assets/`. Images have MIME, size, and decoded-dimension checks. No third-party APK is installed or modified.
 
-Theme creation uses the supplied background/accent/card colors (named colors or `#RRGGBB`), with a dark background, cyan accent, purple secondary accent, dark card, and glass style as defaults. A review dialog shows the exact resulting palette before saving. Custom theme names and styles/colors are validated before persistence; an invalid or edited theme file falls back safely rather than being applied.
+## What is not implemented
+
+- The prompt helper is **not a general-purpose conversational AI model**. It is a deterministic, bounded offline parser; it sends no prompt, app inventory, or history to OpenRouter/Gemini. The separate AI settings screen remains a connection tester. The guided request → preview → apply/asset-search path is implemented without any model or paid service, but open-ended chat is not.
+- Downloads is **not silently scanned wholesale**. Android's scoped storage is respected: the user opens the document picker and selects the relevant file. The launcher does not crawl the Downloads folder without the user's selection.
+- Commons search finds abstract, openly reusable imagery, not Spider-Man artwork. License filtering and metadata reduce reuse risk but do not replace a human review of the source page and license terms.
+- A static downloaded icon set is not represented as a compatible installed Android widget provider.
+- No physical-device installation or runtime test is claimed.
 
 ## Android compatibility
-- `minSdk`: 30; `targetSdk`: 30; manifest `maxSdkVersion`: 30. `compileSdk` remains 35 for toolchain availability; CMake targets Android 30.
-- Native build and APK packaging are restricted to `armeabi-v7a`; local artifact checks verify the packaged native library is a 32-bit ARM ELF binary and that no other ABI is present.
-- **`maxSdkVersion` caveat:** it is declared to express the API-30-only intent, but Android's [official guidance](https://developer.android.com/guide/topics/manifest/uses-sdk-element) discourages relying on it: some Android versions do not enforce it for sideload/install, and an OS upgrade can make an app unavailable. This declaration is not a universal guarantee that newer Android versions will block every sideload.
-- The manifest declares only launcher and ADW/Nova icon-pack intent queries needed for Android 11 package visibility. It does not request broad `QUERY_ALL_PACKAGES` visibility.
-- App source is checked by Android lint for platform APIs unavailable at the API-30 minimum.
 
-## Build
-Requires JDK 17+ and Android SDK platform 35, Build Tools 35.0.0, NDK 27.0.12077973 and CMake 3.31.6. The committed Gradle wrapper pins Gradle 8.9.
+- `minSdk=30`; `targetSdk=30`; manifest `maxSdkVersion=30`. `compileSdk=35` is used for build-tool availability; CMake targets Android 30.
+- Native build/APK packaging accept `armeabi-v7a` only; validation checks the packaged ELF machine type and rejects other ABIs.
+- `maxSdkVersion` expresses intent but is not a universal sideload blocker; Android documentation cautions against relying on it. This target also means the launcher is not available on Android releases below 11.
+- Package visibility is limited to launcher and ADW/Nova icon-pack intent queries; the app does not request `QUERY_ALL_PACKAGES`.
+
+## Build and verification
+
+Requires JDK 17+, Android SDK platform 35, Build Tools 35.0.0, NDK 27.0.12077973, CMake 3.31.6, and the committed Gradle 8.9 wrapper.
 
 ```bash
+./gradlew :app:testDebugUnitTest
+./gradlew :app:lintDebug
 ./gradlew :app:assembleDebug
 ./gradlew :app:assembleRelease
-./gradlew :app:testDebugUnitTest
 ```
 
-APK outputs are written under `app/build/outputs/apk/`. The current GitHub Actions workflow still checks `minSdk=28` and `targetSdk=35`, so its metadata verification will need an authorized workflow update before it can pass for this strict API-30 build. Local validation runs unit tests/lint and inspects merged APK manifests and ELF ABI headers.
+APK files are written to `app/build/outputs/apk/`. The repository's current GitHub Actions workflow still verifies `sdkVersion:'28'` and `targetSdkVersion:'35'`, which conflicts with this API-30-only target. That workflow is intentionally left unchanged; its status must not be inferred from local builds.
 
-See [AI Launcher review and next steps](AI_LAUNCHER_REVIEW.md) for the current implementation assessment, safe-integration guidance, and prompt behavior examples.
+The prototype's `release` build currently uses the debug signing key. It is useful for build validation but is not a Play Store distribution artifact; configure a private release keystore before publishing.

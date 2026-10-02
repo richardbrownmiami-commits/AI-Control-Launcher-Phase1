@@ -5,6 +5,7 @@ import java.io.File
 
 class AssetCatalog(context: Context) {
     private val store = AssetStore(context)
+    private val attributions = AssetAttributionStore(context)
     fun listWallpapers(): List<File> = files(store.wallpapers)
     fun listImages(): List<File> = files(store.images)
     fun listIconOverrides(): List<File> = files(store.icons)
@@ -12,7 +13,12 @@ class AssetCatalog(context: Context) {
     fun listThemes(): List<File> = files(store.themes)
     fun listStyles(): List<File> = files(store.styles)
     fun deleteStyle(name: String): Boolean = store.safeFile(store.styles, name).delete()
-    fun deleteWallpaper(name: String): Boolean = store.wallpaper(name).delete()
+    fun deleteWallpaper(name: String): Boolean {
+        val deleted = store.wallpaper(name).delete()
+        if (deleted) attributions.remove("wallpaper", name)
+        return deleted
+    }
+    fun wallpaperAttribution(name: String): AssetAttribution? = attributions.forAsset("wallpaper", name)
     fun deleteImage(name: String): Boolean = store.image(name).delete()
     fun deleteIconOverride(packageName: String): Boolean = store.icon(packageName.removeSuffix(".png")).delete()
     fun deleteIconPack(name: String): Boolean = deleteRecursively(File(store.iconPacks, name))

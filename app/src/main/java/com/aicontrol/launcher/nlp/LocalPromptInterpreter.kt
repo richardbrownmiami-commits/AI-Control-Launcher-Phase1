@@ -44,7 +44,13 @@ object LocalPromptInterpreter {
         val creatingTheme = lower.matches(Regex("^(please\\s+)?(create|make|design|build)\\b.*\\btheme\\b.*$"))
         val explicitColors = hasColorAssignment(lower)
         val explicitName = extractNamedTheme(text)
-        if (creatingTheme && (explicitName != null || explicitColors)) {
+        val inferredName = inferredThemeName(text)
+        if (creatingTheme && explicitName == null && !explicitColors && inferredName != null) {
+            availableThemes.firstOrNull { it.equals(inferredName, ignoreCase = true) }?.let { existing ->
+                return PromptInterpretation.Ready(LauncherCommand.ApplyTheme(existing), "Use the '$existing' theme.")
+            }
+        }
+        if (creatingTheme && (explicitName != null || explicitColors || inferredName != null)) {
             return createTheme(text, explicitName)
         }
 
@@ -108,20 +114,21 @@ object LocalPromptInterpreter {
     }
 
     private fun createTheme(text: String, explicitName: String?): PromptInterpretation {
-        val name = explicitName ?: Regex(
+        val name = explicitName ?: inferredThemeName(text) ?: Regex(
             "^(?:please\\s+)?(?:create|make|design|build)\\s+(?:me\\s+)?(?:a\\s+)?([A-Za-z0-9][A-Za-z0-9 _.-]{0,39}?)\\s+theme(?:\\s+with\\b.*)?$",
             RegexOption.IGNORE_CASE
         ).find(text)?.groupValues?.get(1)?.trim()
             ?: return PromptInterpretation.Clarification("Name the theme, for example: ‘Create a theme called Ocean with blue background and cyan accent.’")
 
         return try {
+            val palette = ThemeSpec.suggestedPalette(name)
             val values = ThemeSpec.validate(
                 name = name,
-                background = colorAfter(text, listOf("background", "bg")) ?: ThemeSpec.DEFAULT_BACKGROUND,
-                accent = colorAfter(text, listOf("accent")) ?: ThemeSpec.DEFAULT_ACCENT,
-                accent2 = colorAfter(text, listOf("secondary accent", "accent2")) ?: ThemeSpec.DEFAULT_ACCENT2,
-                card = colorAfter(text, listOf("card")) ?: ThemeSpec.DEFAULT_CARD,
-                style = styleAfter(text) ?: ThemeSpec.DEFAULT_STYLE
+                background = colorAfter(text, listOf("background", "bg")) ?: palette.background,
+                accent = colorAfter(text, listOf("accent")) ?: palette.accent,
+                accent2 = colorAfter(text, listOf("secondary accent", "accent2")) ?: palette.accent2,
+                card = colorAfter(text, listOf("card")) ?: palette.card,
+                style = styleAfter(text) ?: palette.style
             )
             val preview = "Create '${values.name}' — background ${values.background}, accent ${values.accent}, secondary accent ${values.accent2}, card ${values.card}, ${values.style} style."
             PromptInterpretation.Ready(LauncherCommand.CreateTheme(values), preview)
@@ -129,6 +136,11 @@ object LocalPromptInterpreter {
             PromptInterpretation.Clarification(error.message ?: "Please check the theme name and colors.")
         }
     }
+
+    private fun inferredThemeName(text: String): String? = Regex(
+        "^(?:please\\s+)?(?:create|make|design|build)\\s+(?:me\\s+)?(?:a\\s+)?([A-Za-z0-9][A-Za-z0-9 _.-]{0,39}?)\\s+theme(?:\\s+with\\b.*)?$",
+        RegexOption.IGNORE_CASE
+    ).find(text)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotBlank() }
 
     private fun extractNamedTheme(text: String): String? = Regex(
         "\\btheme\\s+(?:called|named)\\s+([A-Za-z0-9][A-Za-z0-9 _.-]{0,39}?)(?=\\s+(?:with|and)\\b|[,;]|$)",
@@ -203,5 +215,5 @@ object LocalPromptInterpreter {
     }
 
     private fun helpText(): String =
-        "Local commands work without an API key and stay on this device. Examples: ‘Create a theme called Ocean with blue background and cyan accent’; ‘use midnight theme’; ‘set layout to dense’; ‘set card style to neon’; ‘hide Calculator’; ‘show Calculator’; ‘open Camera’. Every change is shown for review before it is applied. The current app does not yet use an external AI model for chat."
+        "The offline launcher helper understands bounded commands; it is not a free-form AI chatbot and sends nothing to a model. Try ‘make a Spider-Man theme’, ‘create a theme called Ocean with blue background and cyan accent’, ‘set layout to dense’, ‘hide Calculator’, or ‘open Camera’. Theme requests get an editable palette preview. Choose Assets to import an image from Downloads or search reusable, attributed wallpaper. Installed Android widgets can be added from the launcher menu. Every change is reviewed before it is applied."
 }

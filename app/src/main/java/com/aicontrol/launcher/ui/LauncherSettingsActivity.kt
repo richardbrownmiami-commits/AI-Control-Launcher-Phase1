@@ -41,10 +41,13 @@ class LauncherSettingsActivity : Activity() {
         })
 
         root.addView(section("Appearance"))
+        val builtInThemes = listOf("default", "midnight", "ocean", "ember")
+        val themeOptions = builtInThemes.filter { builtIn -> engine.availableThemes().any { it.equals(builtIn, true) } } +
+            engine.availableThemes().filterNot { available -> builtInThemes.any { it.equals(available, true) } }.sorted()
         val theme = Spinner(this)
         theme.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
-            listOf("default", "midnight", "ocean", "ember"))
-        theme.setSelection(listOf("default", "midnight", "ocean", "ember").indexOf(engine.theme()).coerceAtLeast(0))
+            themeOptions)
+        theme.setSelection(themeOptions.indexOfFirst { it.equals(engine.theme(), true) }.coerceAtLeast(0))
         root.addView(row("Theme", theme))
 
         val style = Spinner(this)
