@@ -23,7 +23,7 @@ class LauncherAssetManager(private val context: Context) {
         context.getSharedPreferences("launcher_state", Context.MODE_PRIVATE).edit().putString("active_wallpaper", file.name).apply()
     }
 
-    fun activeWallpaper(): File? = store.wallpaper(context.getSharedPreferences("launcher_state", Context.MODE_PRIVATE).getString("active_wallpaper", "") ?: "").takeIf { it.isFile }\n\n    fun downloadImage(url: String, name: String): Result<File> =
+    fun activeWallpaper(): File? {\n        val name = context.getSharedPreferences("launcher_state", Context.MODE_PRIVATE).getString("active_wallpaper", "") ?: ""\n        if (name.isBlank()) return null\n        return store.wallpaper(name).takeIf { it.isFile }\n    }\n\n    fun downloadImage(url: String, name: String): Result<File> =
         downloader.download(url, store.image(name)).map { it.file }
 
     fun downloadIcon(url: String, packageName: String): Result<File> =
