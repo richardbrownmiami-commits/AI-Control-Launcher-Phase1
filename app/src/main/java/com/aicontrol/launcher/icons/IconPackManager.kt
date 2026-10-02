@@ -13,7 +13,7 @@ data class InstalledIconPack(val packageName: String, val label: String)
 
 class IconPackManager(private val context: Context) {
     private val pm = context.packageManager
-    private val cache = ConcurrentHashMap<String, Map<String, Int>>()
+    private val cache = ConcurrentHashMap<String, Map<String, String>>()
 
     fun installedPacks(): List<InstalledIconPack> {
         val actions = listOf("org.adw.ActivityStarter.THEMES", "com.novalauncher.THEME")
@@ -50,7 +50,7 @@ class IconPackManager(private val context: Context) {
         val ai = pm.getApplicationInfo(packPackage, 0)
         val resources = pm.getResourcesForApplication(ai)
         val id = resources.getIdentifier("appfilter", "xml", packPackage)
-        if (id == 0) return result.mapValues { 0 }
+        if (id == 0) return result
         val parser = resources.getXml(id)
         parser.use {
             var event = it.eventType
@@ -60,9 +60,9 @@ class IconPackManager(private val context: Context) {
                     val drawable = it.getAttributeValue(null, "drawable")
                     if (!component.isNullOrBlank() && !drawable.isNullOrBlank()) {
                         val normalized = normalizeComponent(component)
-                        result[normalized] = resources.getIdentifier(drawable, "drawable", packPackage)
+                        result[normalized] = drawable
                         val pkg = normalized.substringBefore("/")
-                        if (pkg.isNotBlank()) result.putIfAbsent(pkg, resources.getIdentifier(drawable, "drawable", packPackage))
+                        if (pkg.isNotBlank()) result.putIfAbsent(pkg, drawable)
                     }
                 }
                 event = it.next()
