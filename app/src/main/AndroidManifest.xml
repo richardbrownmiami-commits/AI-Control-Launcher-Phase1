@@ -8,6 +8,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.AIControlLauncher">
         <activity android:name=".ui.SettingsActivity" android:exported="false" />
+        <activity android:name=".ui.LauncherSettingsActivity" android:exported="false" />
         <activity android:name=".ui.AssetsActivity" android:exported="false" />
         <activity android:name=".ui.MainActivity" android:exported="true">
             <intent-filter>
