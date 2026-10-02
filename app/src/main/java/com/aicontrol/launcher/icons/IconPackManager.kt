@@ -45,8 +45,8 @@ class IconPackManager(private val context: Context) {
 
     fun clearCache() { cache.clear() }
 
-    private fun loadMappings(packPackage: String): Map<String, Int> {
-        val result = linkedMapOf<String, Int>()
+    private fun loadMappings(packPackage: String): Map<String, String> {
+        val result = linkedMapOf<String, String>()
         val ai = pm.getApplicationInfo(packPackage, 0)
         val resources = pm.getResourcesForApplication(ai)
         val id = resources.getIdentifier("appfilter", "xml", packPackage)
