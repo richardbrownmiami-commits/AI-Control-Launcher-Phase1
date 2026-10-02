@@ -1,6 +1,6 @@
 # AI Control Launcher
 
-Android HOME launcher configured to run on Android 11 (API 30) and 32-bit ARMv7a. The minimum SDK is API 28 (Android 9); the APK targets API 35 and contains a native ARMv7a ABI guard library.
+Android HOME launcher configured specifically for Android 11 (API 30) on 32-bit ARMv7a. The APK declares `minSdk=30`, `targetSdk=30`, and `maxSdkVersion=30`, and packages only `armeabi-v7a` native code.
 
 ## Current features
 - A local prompt command bar for creating/applying themes, changing grid layout/card style, hiding/restoring an app in this launcher, and opening an installed app. Parsing runs on-device, requires no API key, and previews every recognized command for confirmation.
@@ -24,11 +24,11 @@ The interpreter deliberately recognizes a bounded set of commands and asks for c
 Theme creation uses the supplied background/accent/card colors (named colors or `#RRGGBB`), with a dark background, cyan accent, purple secondary accent, dark card, and glass style as defaults. A review dialog shows the exact resulting palette before saving. Custom theme names and styles/colors are validated before persistence; an invalid or edited theme file falls back safely rather than being applied.
 
 ## Android compatibility
-- `minSdk`: 28 (Android 9); installs on Android 11 / API 30.
-- `targetSdk`: 35; `compileSdk`: 35. API 30 is supported through the API 28 minimum and source-level compatibility checks.
-- Native build and APK packaging are restricted to `armeabi-v7a`; local artifact checks verified the packaged native library is a 32-bit ARM ELF binary. The existing CI checks the APK ABI paths.
+- `minSdk`: 30; `targetSdk`: 30; manifest `maxSdkVersion`: 30. `compileSdk` remains 35 for toolchain availability; CMake targets Android 30.
+- Native build and APK packaging are restricted to `armeabi-v7a`; local artifact checks verify the packaged native library is a 32-bit ARM ELF binary and that no other ABI is present.
+- **`maxSdkVersion` caveat:** it is declared to express the API-30-only intent, but Android's [official guidance](https://developer.android.com/guide/topics/manifest/uses-sdk-element) discourages relying on it: some Android versions do not enforce it for sideload/install, and an OS upgrade can make an app unavailable. This declaration is not a universal guarantee that newer Android versions will block every sideload.
 - The manifest declares only launcher and ADW/Nova icon-pack intent queries needed for Android 11 package visibility. It does not request broad `QUERY_ALL_PACKAGES` visibility.
-- App source was checked for platform APIs introduced after API 30; the reviewed calls are available by the minimum supported API level.
+- App source is checked by Android lint for platform APIs unavailable at the API-30 minimum.
 
 ## Build
 Requires JDK 17+ and Android SDK platform 35, Build Tools 35.0.0, NDK 27.0.12077973 and CMake 3.31.6. The committed Gradle wrapper pins Gradle 8.9.
@@ -39,6 +39,6 @@ Requires JDK 17+ and Android SDK platform 35, Build Tools 35.0.0, NDK 27.0.12077
 ./gradlew :app:testDebugUnitTest
 ```
 
-APK outputs are written under `app/build/outputs/apk/`. GitHub Actions builds both variants and verifies SDK metadata and ABI packaging; local validation additionally runs lint/unit tests and inspects the ELF header.
+APK outputs are written under `app/build/outputs/apk/`. The current GitHub Actions workflow still checks `minSdk=28` and `targetSdk=35`, so its metadata verification will need an authorized workflow update before it can pass for this strict API-30 build. Local validation runs unit tests/lint and inspects merged APK manifests and ELF ABI headers.
 
 See [AI Launcher review and next steps](AI_LAUNCHER_REVIEW.md) for the current implementation assessment, safe-integration guidance, and prompt behavior examples.
