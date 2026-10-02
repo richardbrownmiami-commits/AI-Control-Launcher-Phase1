@@ -50,6 +50,15 @@ class ActionEngine(context:Context){
  fun layout():String=prefs.getString("layout","grid")?:"grid"
  fun style():String=prefs.getString("style",themeState().style)?:"glass"
  fun iconPack():String=prefs.getString("icon_pack","")?:""
+ fun installedIconPack():String=prefs.getString("installed_icon_pack","")?:""
+ fun showLabels():Boolean=prefs.getBoolean("show_labels",true)
+ fun dockCount():Int=prefs.getInt("dock_count",5)
+ fun setTheme(value:String){prefs.edit().putString("theme",value).apply()}
+ fun setStyle(value:String){prefs.edit().putString("style",value).apply()}
+ fun setLayout(value:String){prefs.edit().putString("layout",value).apply()}
+ fun setInstalledIconPack(value:String){prefs.edit().putString("installed_icon_pack",value).apply()}
+ fun setShowLabels(value:Boolean){prefs.edit().putBoolean("show_labels",value).apply()}
+ fun setDockCount(value:Int){prefs.edit().putInt("dock_count",value.coerceIn(3,6)).apply()}
 
  fun themeState():ThemeState{
   val fallback=ThemeState(Color.rgb(8,10,18),Color.rgb(70,210,255),Color.rgb(155,92,255),Color.rgb(20,23,35),prefs.getString("style","glass")?:"glass")
