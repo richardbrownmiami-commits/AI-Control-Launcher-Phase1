@@ -1,0 +1,83 @@
+package com.aicontrol.launcher.ai
+
+import com.aicontrol.launcher.theme.ThemeSpec
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class AiPlanValidatorTest {
+    private val themes = setOf("default", "ocean", "Midnight")
+
+    @Test
+    fun validatesThemeAndWhitelistedAssetWidgetActions() {
+        val response = """{
+            "message":"Here is a blue palette and a wallpaper search.",
+            "clarification":null,
+            "theme":{"operation":"CREATE","name":"Ocean night","background":"#061827","accent":"cyan","accent2":"#9B5CFF","card":"#141723","style":"neon"},
+            "actions":[{"type":"SEARCH_ASSETS","query":"abstract ocean blue wallpaper"},{"type":"SET_LAYOUT","value":"dense"}]
+        }"""
+        val decision = AiPlanValidator.parse(response, themes)
+        assertTrue(decision is AiPlanDecision.Review)
+        val plan = (decision as AiPlanDecision.Review).plan
+        val created = plan.theme as AiThemeOperation.Create
+        assertEquals("Ocean night", created.values.name)
+        assertEquals("#46D2FF", created.values.accent)
+        assertEquals(2, plan.actions.size)
+        assertEquals("dense", (plan.actions[1] as AiLauncherAction.SetLayout).value)
+    }
+
+    @Test
+    fun returnsClarificationWithoutAnyActionPlan() {
+        val decision = AiPlanValidator.parse(
+            """{"message":"I can do that.","clarification":"Which palette name should I use?","theme":null,"actions":[]}""",
+            themes
+        )
+        assertTrue(decision is AiPlanDecision.Clarification)
+        assertEquals("Which palette name should I use?", (decision as AiPlanDecision.Clarification).question)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsUnsupportedDownloadToolAndUrl() {
+        AiPlanValidator.parse(
+            """{"message":"Downloading now","theme":null,"actions":[{"type":"DOWNLOAD_WALLPAPER","url":"https://example.invalid/image.jpg"}]}""",
+            themes
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsUrlOrUnexpectedFieldsOnAllowedSearchAction() {
+        AiPlanValidator.parse(
+            """{"message":"Search","theme":null,"actions":[{"type":"SEARCH_ASSETS","query":"abstract blue wallpaper","url":"https://example.invalid/image.jpg"}]}""",
+            themes
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsUnlistedThemeAndUnsafeThemeFields() {
+        AiPlanValidator.parse(
+            """{"message":"Apply it","theme":{"operation":"APPLY","name":"not installed","code":"run()"},"actions":[]}""",
+            themes
+        )
+    }
+
+    @Test
+    fun confirmationGateDoesNotReleaseAPlanUntilConfirmAndIsSingleUse() {
+        val plan = AiLauncherPlan(
+            "Ready for review",
+            AiThemeOperation.Create(ThemeSpec.validate("Ocean")),
+            listOf(AiLauncherAction.AddWidget)
+        )
+        val gate = AiPlanConfirmationGate()
+        gate.stage(plan)
+        assertTrue(gate.hasPending())
+        assertEquals(plan, gate.confirm())
+        assertFalse(gate.hasPending())
+        assertNull(gate.confirm())
+
+        gate.stage(plan)
+        gate.cancel()
+        assertNull(gate.confirm())
+    }
+}

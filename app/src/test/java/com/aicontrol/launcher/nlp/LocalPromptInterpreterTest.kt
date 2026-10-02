@@ -37,6 +37,13 @@ class LocalPromptInterpreterTest {
         assertEquals("neon", values.style)
     }
 
+    @Test fun offlineFallbackStillCreatesAThemeWithoutAnyProvider() {
+        val result = LocalPromptInterpreter.interpret("Make a Coral reef theme", apps, themes)
+        assertTrue(result is PromptInterpretation.Ready)
+        val values = ((result as PromptInterpretation.Ready).command as LauncherCommand.CreateTheme).values
+        assertEquals("Coral reef", values.name)
+    }
+
     @Test fun resolvesPresetThemeWithoutCreatingAFile() {
         val result = LocalPromptInterpreter.interpret("Make a midnight theme", apps, themes)
         assertTrue(result is PromptInterpretation.Ready)

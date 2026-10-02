@@ -16,11 +16,25 @@ import com.aicontrol.launcher.apps.AppInfo
 import com.aicontrol.launcher.apps.AppRepository
 import com.aicontrol.launcher.assets.LauncherAssetManager
 import com.aicontrol.launcher.assets.ImageAssetValidation
+import com.aicontrol.launcher.ai.AiLauncherAction
+import com.aicontrol.launcher.ai.AiPlanConfirmationGate
+import com.aicontrol.launcher.ai.AiPlanDecision
+import com.aicontrol.launcher.ai.AiPlanValidator
+import com.aicontrol.launcher.ai.AiThemeOperation
+import com.aicontrol.launcher.ai.AiTurn
+import com.aicontrol.launcher.ai.createProvider
+import com.aicontrol.launcher.data.SettingsStore
 import com.aicontrol.launcher.icons.IconPackManager
 import com.aicontrol.launcher.nlp.AppTarget
 import com.aicontrol.launcher.nlp.LauncherCommand
 import com.aicontrol.launcher.nlp.LocalPromptInterpreter
 import com.aicontrol.launcher.nlp.PromptInterpretation
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 private const val NATIVE_ABI_GUARD = "launcherabi"
@@ -42,6 +56,11 @@ class MainActivity : Activity() {
     private lateinit var widgetManager: AppWidgetManager
     private lateinit var widgetHost: AppWidgetHost
     private lateinit var widgetContainer: LinearLayout
+    private lateinit var assistantCaption: TextView
+    private val aiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val aiHistory = mutableListOf<AiTurn>()
+    private val aiConfirmation = AiPlanConfirmationGate()
+    private var aiBusy = false
     private var pendingWidgetId = -1
     private var downY = 0f
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -63,6 +82,7 @@ class MainActivity : Activity() {
         if (::content.isInitialized) {
             runCatching { widgetHost.startListening() }
             UiTheme.bind(engine)
+            updateAssistantCaption()
             render()
         }
     }
@@ -70,6 +90,11 @@ class MainActivity : Activity() {
     override fun onPause() {
         if (::widgetHost.isInitialized) runCatching { widgetHost.stopListening() }
         super.onPause()
+    }
+
+    override fun onDestroy() {
+        aiScope.cancel()
+        super.onDestroy()
     }
 
     private fun buildUi() {
@@ -103,7 +128,7 @@ class MainActivity : Activity() {
         top.addView(actionButton("Menu") {
             AlertDialog.Builder(this@MainActivity)
                 .setTitle("Launcher")
-                .setItems(arrayOf("Customize launcher", "Assets", "Add Android widget", "AI connection settings (test only)")) { _, which ->
+                .setItems(arrayOf("Customize launcher", "Assets", "Add Android widget", "AI provider settings")) { _, which ->
                     when (which) {
                         0 -> startActivity(Intent(this@MainActivity, LauncherSettingsActivity::class.java))
                         1 -> startActivity(Intent(this@MainActivity, AssetsActivity::class.java))
@@ -115,15 +140,21 @@ class MainActivity : Activity() {
         })
         content.addView(top, LinearLayout.LayoutParams(-1, dp(46)))
 
-        content.addView(TextView(this).apply {
-            text = "LOCAL COMMANDS · works offline, no API key needed"
+        assistantCaption = TextView(this).apply {
             textSize = 10f
             setTextColor(UiTheme.accent)
             setPadding(dp(4), dp(8), 0, dp(4))
+        }
+        content.addView(assistantCaption)
+        content.addView(TextView(this).apply {
+            text = "Configured AI sends your prompt, recent chat, and appearance settings to the selected provider. Local images are never uploaded. Asset searches go to Wikimedia only after confirmation."
+            textSize = 10f
+            setTextColor(UiTheme.textMuted)
+            setPadding(dp(4), 0, dp(4), dp(6))
         })
         val commandRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         commandInput = EditText(this).apply {
-            hint = "Create an Ocean theme or hide Calculator"
+            hint = "Ask about a theme, wallpaper search, or widget"
             setSingleLine()
             textSize = 14f
             setTextColor(Color.WHITE)
@@ -133,10 +164,10 @@ class MainActivity : Activity() {
         }
         commandRow.addView(commandInput, LinearLayout.LayoutParams(0, dp(46), 1f))
         commandRow.addView(Button(this).apply {
-            text = "Go"
+            text = "Send"
             setTextColor(Color.WHITE)
             background = UiTheme.rounded(UiTheme.card, 18f, UiTheme.accent, 1)
-            contentDescription = "Review local launcher command"
+            contentDescription = "Ask the AI assistant or use the offline helper"
             setOnClickListener { handlePrompt() }
             layoutParams = LinearLayout.LayoutParams(dp(64), dp(46)).apply { leftMargin = dp(7) }
         })
@@ -216,8 +247,78 @@ class MainActivity : Activity() {
         render()
     }
 
+    private fun updateAssistantCaption() {
+        if (!::assistantCaption.isInitialized) return
+        val settings = SettingsStore(this)
+        assistantCaption.text = if (settings.activeKey().isBlank()) {
+            "OFFLINE HELPER · no provider key configured"
+        } else {
+            "AI ASSISTANT · ${settings.provider} / ${settings.model}"
+        }
+    }
+
     private fun handlePrompt() {
-        val prompt = commandInput.text?.toString().orEmpty()
+        val prompt = commandInput.text?.toString().orEmpty().trim()
+        if (prompt.isBlank()) {
+            Toast.makeText(this, "Enter a message first", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (prompt.length > 2_000) {
+            Toast.makeText(this, "Please keep a message under 2,000 characters", Toast.LENGTH_LONG).show()
+            return
+        }
+        val settings = SettingsStore(this)
+        if (settings.activeKey().isBlank()) {
+            runOfflinePrompt(prompt)
+            return
+        }
+        if (aiBusy) return
+        val provider = try {
+            createProvider(settings)
+        } catch (error: Exception) {
+            showAiUnavailable(prompt, error)
+            return
+        }
+        aiBusy = true
+        updateAssistantCaption()
+        val state = "Current appearance: theme=${engine.theme()}, layout=${engine.layout()}, style=${engine.style()}. " +
+            "Available themes: ${engine.availableThemes().sorted().joinToString(", ")}."
+        Toast.makeText(this, "Contacting ${settings.provider}…", Toast.LENGTH_SHORT).show()
+        aiScope.launch {
+            try {
+                val reply = withContext(Dispatchers.IO) {
+                    provider.chat(prompt, state, aiHistory.toList()).getOrThrow()
+                }
+                val decision = try {
+                    AiPlanValidator.parse(reply.text, engine.availableThemes())
+                } catch (error: Exception) {
+                    showAiValidationFailure(reply.text, error)
+                    return@launch
+                }
+                appendAiHistory(AiTurn("user", prompt))
+                appendAiHistory(AiTurn("assistant", reply.text))
+                when (decision) {
+                    is AiPlanDecision.Conversation -> showAssistantMessage(decision.response)
+                    is AiPlanDecision.Clarification -> showAssistantClarification(decision.response, decision.question)
+                    is AiPlanDecision.Review -> reviewAiPlan(decision.plan)
+                }
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                showAiUnavailable(prompt, error)
+            } finally {
+                aiBusy = false
+                updateAssistantCaption()
+            }
+        }
+    }
+
+    private fun appendAiHistory(turn: AiTurn) {
+        aiHistory += turn
+        while (aiHistory.size > 8) aiHistory.removeAt(0)
+    }
+
+    private fun runOfflinePrompt(prompt: String) {
         val installed = apps.listLaunchableApps()
         val result = LocalPromptInterpreter.interpret(
             prompt,
@@ -227,7 +328,7 @@ class MainActivity : Activity() {
         when (result) {
             is PromptInterpretation.Ready -> reviewPrompt(result, installed)
             is PromptInterpretation.Help -> AlertDialog.Builder(this)
-                .setTitle("Local command help")
+                .setTitle("Offline helper")
                 .setMessage(result.message)
                 .setPositiveButton(android.R.string.ok, null)
                 .show()
@@ -239,12 +340,125 @@ class MainActivity : Activity() {
                     else -> "Please revise the command."
                 }
                 AlertDialog.Builder(this)
-                    .setTitle("Please clarify")
+                    .setTitle("Offline helper · please clarify")
                     .setMessage(message)
                     .setPositiveButton(android.R.string.ok, null)
                     .show()
             }
         }
+    }
+
+    private fun showAiUnavailable(prompt: String, error: Exception) {
+        AlertDialog.Builder(this)
+            .setTitle("AI provider unavailable")
+            .setMessage("No launcher changes were made. ${error.message ?: "The request could not be completed."}\n\nYou can configure a provider in AI Settings or try the deterministic offline helper.")
+            .setNegativeButton("Close", null)
+            .setPositiveButton("Use offline helper") { _, _ -> runOfflinePrompt(prompt) }
+            .show()
+    }
+
+    private fun showAiValidationFailure(rawResponse: String, error: Exception) {
+        val safePreview = rawResponse.trim().take(1_200)
+        AlertDialog.Builder(this)
+            .setTitle("AI response not accepted")
+            .setMessage("Nothing was changed because the response did not match the supported plan schema. ${error.message ?: "Please try again."}\n\nModel response:\n$safePreview")
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun showAssistantMessage(message: String) {
+        AlertDialog.Builder(this)
+            .setTitle("AI assistant")
+            .setMessage(message)
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun showAssistantClarification(response: String, question: String) {
+        AlertDialog.Builder(this)
+            .setTitle("Please clarify")
+            .setMessage("$response\n\n$question\n\nReply in the assistant field to continue this conversation.")
+            .setPositiveButton(android.R.string.ok, null)
+            .show()
+    }
+
+    private fun reviewAiPlan(plan: com.aicontrol.launcher.ai.AiLauncherPlan) {
+        aiConfirmation.stage(plan)
+        val details = mutableListOf<String>()
+        when (val theme = plan.theme) {
+            is AiThemeOperation.Create -> details += "Create theme ‘${theme.values.name}’ (${theme.values.background}, accent ${theme.values.accent}, ${theme.values.style} style)."
+            is AiThemeOperation.Apply -> details += "Apply the ‘${theme.name}’ theme."
+            null -> Unit
+        }
+        plan.actions.forEach { action ->
+            details += when (action) {
+                is AiLauncherAction.SearchAssets -> "Search Wikimedia Commons for ‘${action.query}’. The search phrase will be sent only after confirmation; each download needs a separate confirmation."
+                AiLauncherAction.AddWidget -> "Open Android’s widget picker so you can choose an installed widget."
+                is AiLauncherAction.SetLayout -> "Set launcher layout to ‘${action.value}’."
+                is AiLauncherAction.SetStyle -> "Set card style to ‘${action.value}’."
+            }
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(8), dp(18), dp(12))
+            addView(TextView(this@MainActivity).apply {
+                text = "Model response\n${plan.response}"
+                textSize = 15f
+                setTextColor(UiTheme.textPrimary)
+                setPadding(0, 0, 0, dp(12))
+            })
+            if (plan.theme is AiThemeOperation.Create) {
+                addView(themePreview((plan.theme as AiThemeOperation.Create).values))
+            }
+            addView(TextView(this@MainActivity).apply {
+                text = "Plan to confirm\n• " + details.joinToString("\n• ")
+                textSize = 13f
+                setTextColor(UiTheme.textPrimary)
+                setPadding(0, dp(12), 0, 0)
+            })
+        }
+        val continuation = plan.actions.any { it is AiLauncherAction.SearchAssets || it === AiLauncherAction.AddWidget }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Review AI plan")
+            .setView(ScrollView(this).apply { addView(body) })
+            .setNegativeButton("Cancel") { _, _ -> aiConfirmation.cancel() }
+            .setPositiveButton(if (continuation) "Confirm & continue" else "Confirm & apply") { _, _ ->
+                val confirmed = aiConfirmation.confirm() ?: return@setPositiveButton
+                try {
+                    executeAiPlan(confirmed)
+                } catch (error: Exception) {
+                    Toast.makeText(this, error.message ?: "Unable to apply the confirmed plan", Toast.LENGTH_LONG).show()
+                }
+            }
+            .setOnDismissListener { aiConfirmation.cancel() }
+            .create()
+        dialog.show()
+    }
+
+    private fun executeAiPlan(plan: com.aicontrol.launcher.ai.AiLauncherPlan) {
+        when (val theme = plan.theme) {
+            is AiThemeOperation.Create -> saveTheme(theme.values)
+            is AiThemeOperation.Apply -> engine.setTheme(theme.name)
+            null -> Unit
+        }
+        var assetQuery: String? = null
+        var chooseWidget = false
+        plan.actions.forEach { action ->
+            when (action) {
+                is AiLauncherAction.SearchAssets -> assetQuery = action.query
+                AiLauncherAction.AddWidget -> chooseWidget = true
+                is AiLauncherAction.SetLayout -> engine.setLayout(action.value)
+                is AiLauncherAction.SetStyle -> engine.setStyle(action.value)
+            }
+        }
+        commandInput.text.clear()
+        render()
+        when {
+            assetQuery != null -> startActivity(Intent(this, AssetsActivity::class.java)
+                .putExtra(AssetsActivity.EXTRA_SUGGESTED_QUERY, assetQuery))
+            chooseWidget -> addAndroidWidget()
+        }
+        Toast.makeText(this, "Confirmed plan applied", Toast.LENGTH_SHORT).show()
     }
 
     private fun reviewPrompt(result: PromptInterpretation.Ready, installed: List<AppInfo>) {
@@ -310,7 +524,7 @@ class MainActivity : Activity() {
                 setTextColor(Color.WHITE)
             })
             addView(TextView(this@MainActivity).apply {
-                text = "Offline palette preview. Optional wallpaper art can be imported or found under an open license."
+                text = "Palette preview. Optional wallpaper art can be imported locally or searched under an open license."
                 textSize = 11f
                 setTextColor(Color.LTGRAY)
                 setPadding(0, dp(3), 0, dp(12))

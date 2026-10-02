@@ -109,7 +109,7 @@ object LocalPromptInterpreter {
         }
 
         return PromptInterpretation.Unrecognized(
-            "I don't recognize that command yet. Try a theme, layout, style, hide/show app, or open-app command."
+            "Free-form chat needs a configured AI provider. The offline helper understands bounded theme, layout, style, hide/show app, and open-app commands."
         )
     }
 
@@ -215,5 +215,5 @@ object LocalPromptInterpreter {
     }
 
     private fun helpText(): String =
-        "The offline launcher helper understands bounded commands; it is not a free-form AI chatbot and sends nothing to a model. Try ‘make a Spider-Man theme’, ‘create a theme called Ocean with blue background and cyan accent’, ‘set layout to dense’, ‘hide Calculator’, or ‘open Camera’. Theme requests get an editable palette preview. Choose Assets to import an image from Downloads or search reusable, attributed wallpaper. Installed Android widgets can be added from the launcher menu. Every change is reviewed before it is applied."
+        "The offline launcher helper understands bounded commands; it is not a free-form AI chatbot and sends nothing to a model. Configure a provider in AI Settings for conversational help. Offline, try ‘make a Spider-Man theme’, ‘create a theme called Ocean with blue background and cyan accent’, ‘set layout to dense’, ‘hide Calculator’, or ‘open Camera’. Theme requests get an editable palette preview. Choose Assets to import an image from Downloads or search reusable, attributed wallpaper. Installed Android widgets can be added from the launcher menu. Every change is reviewed before it is applied."
 }

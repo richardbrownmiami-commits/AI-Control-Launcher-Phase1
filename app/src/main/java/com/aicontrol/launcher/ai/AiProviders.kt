@@ -1,6 +1,7 @@
 package com.aicontrol.launcher.ai
 
 import com.aicontrol.launcher.data.SettingsStore
+import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.Dispatchers
@@ -8,45 +9,38 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
-fun createProvider(settings: SettingsStore): AiProvider =
-    if (settings.provider == SettingsStore.PROVIDER_GEMINI) GeminiProvider(settings.model, settings.geminiKey)
-    else OpenRouterProvider(settings.model, settings.openRouterKey)
-
-private fun cleanJson(text: String): String {
-    val fence = "```"
-    var cleaned = text.trim()
-    if (cleaned.startsWith(fence)) {
-        cleaned = cleaned.removePrefix(fence + "json").removePrefix(fence)
-        cleaned = cleaned.removeSuffix(fence).trim()
+fun createProvider(settings: SettingsStore): AiProvider {
+    require(settings.provider == SettingsStore.PROVIDER_OPENROUTER || settings.provider == SettingsStore.PROVIDER_GEMINI) {
+        "Select a supported AI provider in AI Settings."
     }
-    return cleaned
-}
-
-private fun parseReply(raw: String): AiReply {
-    val cleaned = cleanJson(raw)
-    val root = try {
-        JSONObject(cleaned)
-    } catch (ex: Exception) {
-        throw IllegalStateException("AI JSON parse error: "+ex.message+"; raw="+cleaned.take(200))
+    require(settings.model in FreeModels.forProvider(settings.provider)) {
+        "Select one of the models listed for the current provider."
     }
-    val hasMessage = root.has("message")
-    val message = root.optString("message", "").trim()
-    val actions = root.optJSONArray("actions")
-    if (!hasMessage && actions == null) {
-        throw IllegalStateException("AI response missing message/actions; raw="+cleaned.take(200))
+    return if (settings.provider == SettingsStore.PROVIDER_GEMINI) {
+        GeminiProvider(settings.model, settings.geminiKey)
+    } else {
+        OpenRouterProvider(settings.model, settings.openRouterKey)
     }
-    val normalized = JSONObject().put("actions", actions ?: JSONArray()).toString()
-    val reply = if (hasMessage) message else if (actions != null && actions.length() > 0) "Done." else ""
-    if (reply.isBlank() && (actions == null || actions.length() == 0)) {
-        throw IllegalStateException("AI response contained no message and no actions; raw="+cleaned.take(200))
-    }
-    return AiReply(reply, if (actions != null && actions.length() > 0) normalized else null)
 }
 
 private fun errorBody(response: String): String = response.replace(Regex("\\s+"), " ").trim().take(200)
 private fun readResponse(conn: HttpURLConnection): String {
     val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
-    return stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+    if (stream == null) return ""
+    val bytes = stream.use { input ->
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(8192)
+        var total = 0
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            total += count
+            require(total <= 256 * 1024) { "AI provider response exceeded the safe size limit." }
+            output.write(buffer, 0, count)
+        }
+        output.toByteArray()
+    }
+    return String(bytes, Charsets.UTF_8)
 }
 private fun historyText(history: List<AiTurn>): String =
     history.takeLast(8).joinToString("\n") { it.role + ": " + it.content }
@@ -80,7 +74,8 @@ class OpenRouterProvider(private val model: String, private val apiKey: String) 
                     val response=readResponse(conn)
                     if(conn.responseCode !in 200..299) error("OpenRouter HTTP "+conn.responseCode+": "+errorBody(response))
                     val content=JSONObject(response).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
-                    parseReply(content)
+                    require(content.length <= 16_000) { "AI response is too large to review safely." }
+                    AiReply(content)
                 } finally { conn.disconnect() }
             }
         }
@@ -113,7 +108,8 @@ class GeminiProvider(private val model: String, private val apiKey: String) : Ai
                     val response=readResponse(conn)
                     if(conn.responseCode !in 200..299) error("Gemini HTTP "+conn.responseCode+": "+errorBody(response))
                     val content=JSONObject(response).getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
-                    parseReply(content)
+                    require(content.length <= 16_000) { "AI response is too large to review safely." }
+                    AiReply(content)
                 }finally{conn.disconnect()}
             }
         }
