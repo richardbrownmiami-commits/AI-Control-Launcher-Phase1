@@ -29,6 +29,26 @@ class AiPlanValidatorTest {
     }
 
     @Test
+    fun validatesPresetDisplayAttributesForAiCreatedThemes() {
+        val decision = AiPlanValidator.parse(
+            """{"message":"A calm preset","theme":{"operation":"CREATE","name":"Sage AI","typography":"serif","iconStyle":"squircle","backgroundStyle":"aurora"},"actions":[]}""",
+            themes
+        ) as AiPlanDecision.Review
+        val values = (decision.plan.theme as AiThemeOperation.Create).values
+        assertEquals("serif", values.typography)
+        assertEquals("squircle", values.iconStyle)
+        assertEquals("aurora", values.backgroundStyle)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsUnvalidatedThemeDisplayAttributes() {
+        AiPlanValidator.parse(
+            """{"message":"Invalid","theme":{"operation":"CREATE","name":"Unsafe","iconStyle":"remote"},"actions":[]}""",
+            themes
+        )
+    }
+
+    @Test
     fun returnsClarificationWithoutAnyActionPlan() {
         val decision = AiPlanValidator.parse(
             """{"message":"I can do that.","clarification":"Which palette name should I use?","theme":null,"actions":[]}""",

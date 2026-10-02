@@ -66,7 +66,7 @@ object AiPlanValidator {
             "CREATE" -> {
                 requireOnlyKeys(
                     value,
-                    setOf("operation", "name", "background", "accent", "accent2", "card", "style"),
+                    setOf("operation", "name", "background", "accent", "accent2", "card", "style", "typography", "iconStyle", "backgroundStyle"),
                     setOf("operation", "name"),
                     "theme"
                 )
@@ -79,7 +79,10 @@ object AiPlanValidator {
                         accent = optionalString(value, "accent", 20) ?: suggested.accent,
                         accent2 = optionalString(value, "accent2", 20) ?: suggested.accent2,
                         card = optionalString(value, "card", 20) ?: suggested.card,
-                        style = optionalString(value, "style", 20) ?: suggested.style
+                        style = optionalString(value, "style", 20) ?: suggested.style,
+                        typography = optionalString(value, "typography", 20) ?: suggested.typography,
+                        iconStyle = optionalString(value, "iconStyle", 20) ?: suggested.iconStyle,
+                        backgroundStyle = optionalString(value, "backgroundStyle", 20) ?: suggested.backgroundStyle
                     )
                 )
             }

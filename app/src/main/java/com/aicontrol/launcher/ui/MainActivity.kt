@@ -1,5 +1,6 @@
 package com.aicontrol.launcher.ui
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
 import android.appwidget.AppWidgetHost
@@ -24,6 +25,7 @@ import com.aicontrol.launcher.ai.AiThemeOperation
 import com.aicontrol.launcher.ai.AiTurn
 import com.aicontrol.launcher.ai.createProvider
 import com.aicontrol.launcher.data.SettingsStore
+import com.aicontrol.launcher.data.WorkspaceStore
 import com.aicontrol.launcher.icons.IconPackManager
 import com.aicontrol.launcher.nlp.AppTarget
 import com.aicontrol.launcher.nlp.LauncherCommand
@@ -36,12 +38,14 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import kotlin.math.abs
 
 private const val NATIVE_ABI_GUARD = "launcherabi"
 private const val WIDGET_HOST_ID = 7421
 private const val REQUEST_PICK_WIDGET = 6301
 private const val REQUEST_CONFIGURE_WIDGET = 6302
 
+@SuppressLint("SetTextI18n")
 class MainActivity : Activity() {
     private lateinit var apps: AppRepository
     private lateinit var engine: ActionEngine
@@ -49,20 +53,30 @@ class MainActivity : Activity() {
     private lateinit var iconPacks: IconPackManager
     private lateinit var root: FrameLayout
     private lateinit var content: LinearLayout
-    private lateinit var grid: GridLayout
-    private lateinit var search: EditText
     private lateinit var commandInput: EditText
     private lateinit var dock: LinearLayout
     private lateinit var widgetManager: AppWidgetManager
     private lateinit var widgetHost: AppWidgetHost
-    private lateinit var widgetContainer: LinearLayout
     private lateinit var assistantCaption: TextView
+    private lateinit var workspace: FrameLayout
+    private lateinit var drawerOverlay: LinearLayout
+    private lateinit var drawerGrid: GridLayout
+    private lateinit var drawerSearch: EditText
+    private lateinit var pageTitle: TextView
+    private lateinit var homeShortcutGrid: GridLayout
+    private lateinit var appDrawerButton: Button
+    private val homePages = mutableListOf<LinearLayout>()
+    private val homeShortcutGrids = mutableListOf<GridLayout>()
+    private val pageWidgetContainers = mutableListOf<LinearLayout>()
+    private lateinit var workspaceStore: WorkspaceStore
+    private var currentPage = 1
+    private var drawerShowing = false
     private val aiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val aiHistory = mutableListOf<AiTurn>()
     private val aiConfirmation = AiPlanConfirmationGate()
     private var aiBusy = false
     private var pendingWidgetId = -1
-    private var downY = 0f
+    private var pendingWidgetPage = 1
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     override fun onCreate(state: Bundle?) {
@@ -72,6 +86,8 @@ class MainActivity : Activity() {
         engine = ActionEngine(this)
         assets = LauncherAssetManager(this)
         iconPacks = IconPackManager(this)
+        workspaceStore = WorkspaceStore(this)
+        currentPage = engine.homePage()
         widgetManager = getSystemService(AppWidgetManager::class.java)
         widgetHost = AppWidgetHost(this, WIDGET_HOST_ID)
         buildUi()
@@ -82,6 +98,7 @@ class MainActivity : Activity() {
         if (::content.isInitialized) {
             runCatching { widgetHost.startListening() }
             UiTheme.bind(engine)
+            currentPage = engine.homePage()
             updateAssistantCaption()
             render()
         }
@@ -103,148 +120,259 @@ class MainActivity : Activity() {
 
         val wallpaper = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
+            background = UiTheme.homeBackground()
             assets.activeWallpaper()?.let { setImageBitmap(ImageAssetValidation.decodeSampled(it, 2048)) }
         }
         root.addView(wallpaper, FrameLayout.LayoutParams(-1, -1))
-
         val shade = FrameLayout(this).apply {
-            setBackgroundColor(Color.argb(150, Color.red(UiTheme.bg), Color.green(UiTheme.bg), Color.blue(UiTheme.bg)))
+            setBackgroundColor(Color.argb(72, Color.red(UiTheme.bg), Color.green(UiTheme.bg), Color.blue(UiTheme.bg)))
         }
         root.addView(shade, FrameLayout.LayoutParams(-1, -1))
 
         content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(18), dp(14), dp(12))
+            setPadding(dp(12), dp(10), dp(12), dp(8))
         }
         root.addView(content, FrameLayout.LayoutParams(-1, -1))
 
         val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         top.addView(TextView(this).apply {
             text = "AI Control Launcher"
-            textSize = 20f
+            textSize = 18f
+            typeface = UiTheme.font()
             setTextColor(UiTheme.textPrimary)
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         })
-        top.addView(actionButton("Menu") {
-            AlertDialog.Builder(this@MainActivity)
-                .setTitle("Launcher")
-                .setItems(arrayOf("Customize launcher", "Assets", "Add Android widget", "AI provider settings")) { _, which ->
-                    when (which) {
-                        0 -> startActivity(Intent(this@MainActivity, LauncherSettingsActivity::class.java))
-                        1 -> startActivity(Intent(this@MainActivity, AssetsActivity::class.java))
-                        2 -> addAndroidWidget()
-                        3 -> startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
-                    }
-                }
-                .show()
-        })
-        content.addView(top, LinearLayout.LayoutParams(-1, dp(46)))
+        fun topButton(label: String, width: Int, action: () -> Unit) = Button(this).apply {
+            text = label
+            textSize = 10f
+            setTextColor(UiTheme.textPrimary)
+            background = UiTheme.rounded(UiTheme.card, 16f, UiTheme.accent, 1)
+            setOnClickListener { action() }
+            layoutParams = LinearLayout.LayoutParams(dp(width), dp(38)).apply { leftMargin = dp(4) }
+        }
+        top.addView(topButton("Themes", 58) { startActivity(Intent(this, ThemeGalleryActivity::class.java)) })
+        top.addView(topButton("Settings", 62) { startActivity(Intent(this, LauncherSettingsActivity::class.java)) })
+        top.addView(topButton("Apps", 48) { showDrawer() })
+        content.addView(top, LinearLayout.LayoutParams(-1, dp(44)))
 
         assistantCaption = TextView(this).apply {
             textSize = 10f
+            typeface = UiTheme.font()
             setTextColor(UiTheme.accent)
-            setPadding(dp(4), dp(8), 0, dp(4))
+            setPadding(dp(3), dp(2), 0, 0)
         }
-        content.addView(assistantCaption)
-        content.addView(TextView(this).apply {
-            text = "Configured AI sends your prompt, recent chat, and appearance settings to the selected provider. Local images are never uploaded. Asset searches go to Wikimedia only after confirmation."
-            textSize = 10f
-            setTextColor(UiTheme.textMuted)
-            setPadding(dp(4), 0, dp(4), dp(6))
-        })
+        content.addView(assistantCaption, LinearLayout.LayoutParams(-1, dp(20)))
         val commandRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         commandInput = EditText(this).apply {
-            hint = "Ask about a theme, wallpaper search, or widget"
+            hint = "Ask for a theme or launcher change"
             setSingleLine()
-            textSize = 14f
-            setTextColor(Color.WHITE)
+            textSize = 13f
+            typeface = UiTheme.font()
+            setTextColor(UiTheme.textPrimary)
             setHintTextColor(UiTheme.textMuted)
             setPadding(dp(12), 0, dp(12), 0)
             background = UiTheme.rounded(UiTheme.card, 18f, UiTheme.accent, 1)
         }
-        commandRow.addView(commandInput, LinearLayout.LayoutParams(0, dp(46), 1f))
+        commandRow.addView(commandInput, LinearLayout.LayoutParams(0, dp(42), 1f))
         commandRow.addView(Button(this).apply {
             text = "Send"
+            textSize = 12f
             setTextColor(Color.WHITE)
             background = UiTheme.rounded(UiTheme.card, 18f, UiTheme.accent, 1)
             contentDescription = "Ask the AI assistant or use the offline helper"
             setOnClickListener { handlePrompt() }
-            layoutParams = LinearLayout.LayoutParams(dp(64), dp(46)).apply { leftMargin = dp(7) }
+            layoutParams = LinearLayout.LayoutParams(dp(62), dp(42)).apply { leftMargin = dp(6) }
         })
-        content.addView(commandRow, LinearLayout.LayoutParams(-1, dp(46)))
+        content.addView(commandRow, LinearLayout.LayoutParams(-1, dp(42)))
 
-        content.addView(TextView(this).apply {
-            text = "HOME"
-            textSize = 10f
-            setTextColor(UiTheme.accent)
-            setPadding(dp(4), dp(10), 0, dp(4))
-        })
-
-        content.addView(TextView(this).apply {
-            text = java.text.SimpleDateFormat("EEE, d MMM  •  HH:mm", Locale.getDefault()).format(java.util.Date())
-            textSize = 13f
-            setTextColor(UiTheme.textMuted)
-            setPadding(dp(4), 0, 0, dp(8))
-        })
-
-        val widgetHeader = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        widgetHeader.addView(TextView(this).apply {
-            text = "WIDGETS"
-            textSize = 10f
+        val pageHeader = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        pageTitle = TextView(this).apply {
+            textSize = 12f
+            typeface = UiTheme.font()
             setTextColor(UiTheme.accent)
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
-        })
-        widgetHeader.addView(actionButton("+ Add") { addAndroidWidget() })
-        content.addView(widgetHeader, LinearLayout.LayoutParams(-1, dp(38)))
-        widgetContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        content.addView(widgetContainer, LinearLayout.LayoutParams(-1, -2))
+        }
+        pageHeader.addView(pageTitle)
+        pageHeader.addView(smallControl("‹", 38) { setHomePage(currentPage - 1) })
+        pageHeader.addView(smallControl("+ Widget", 76) { addAndroidWidget() })
+        pageHeader.addView(smallControl("›", 38) { setHomePage(currentPage + 1) })
+        content.addView(pageHeader, LinearLayout.LayoutParams(-1, dp(40)))
 
-        search = EditText(this).apply {
+        workspace = SwipeWorkspaceLayout(this) { towardRight ->
+            setHomePage(currentPage + if (towardRight) -1 else 1)
+        }.apply { clipChildren = true }
+        repeat(3) { page ->
+            homePages += createHomePage(page)
+            workspace.addView(homePages.last(), FrameLayout.LayoutParams(-1, -1))
+        }
+        content.addView(workspace, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val pageDots = LinearLayout(this).apply { gravity = Gravity.CENTER }
+        repeat(3) { page ->
+            pageDots.addView(TextView(this).apply {
+                text = listOf("LEFT", "MAIN", "RIGHT")[page]
+                textSize = 9f
+                gravity = Gravity.CENTER
+                typeface = UiTheme.font()
+                setTextColor(if (page == currentPage) UiTheme.accent else UiTheme.textMuted)
+                setPadding(dp(12), dp(4), dp(12), dp(4))
+                setOnClickListener { setHomePage(page) }
+            })
+        }
+        content.addView(pageDots, LinearLayout.LayoutParams(-1, dp(26)))
+
+        val bottom = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            UiTheme.styleCard(this, UiTheme.card, true)
+        }
+        dock = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(0, dp(58), 1f)
+        }
+        bottom.addView(dock)
+        appDrawerButton = Button(this).apply {
+            text = "▦\nApps"
+            textSize = 10f
+            gravity = Gravity.CENTER
+            setTextColor(UiTheme.textPrimary)
+            contentDescription = "Open app drawer"
+            background = UiTheme.rounded(UiTheme.card2, 17f, UiTheme.accent, 1)
+            setOnClickListener { showDrawer() }
+        }
+        bottom.addView(appDrawerButton, LinearLayout.LayoutParams(dp(62), dp(54)).apply { leftMargin = dp(5) })
+        content.addView(bottom, LinearLayout.LayoutParams(-1, dp(66)).apply { topMargin = dp(5) })
+
+        drawerOverlay = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(12))
+            background = UiTheme.homeBackground()
+            visibility = View.GONE
+        }
+        val drawerTop = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        drawerTop.addView(TextView(this).apply {
+            text = "All apps"
+            textSize = 23f
+            typeface = UiTheme.font()
+            setTextColor(UiTheme.textPrimary)
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+        })
+        drawerTop.addView(smallControl("Home", 58) { hideDrawer() })
+        drawerTop.addView(smallControl("⚙", 42) { startActivity(Intent(this, LauncherSettingsActivity::class.java)) })
+        drawerTop.addView(smallControl("◈", 42) { startActivity(Intent(this, ThemeGalleryActivity::class.java)) })
+        drawerOverlay.addView(drawerTop, LinearLayout.LayoutParams(-1, dp(48)))
+
+        val drawerActions = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        drawerActions.addView(TextView(this).apply {
+            text = "Installed apps"
+            textSize = 11f
+            setTextColor(UiTheme.textMuted)
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+        })
+        drawerActions.addView(smallControlWithView("Sort: ${engine.drawerSort()}", 110) {
+            val choices = listOf("A–Z", "Z–A", "Package")
+            val next = choices[(choices.indexOf(engine.drawerSort()).coerceAtLeast(0) + 1) % choices.size]
+            engine.setDrawerSort(next)
+            (it as Button).text = "Sort: $next"
+            renderApps()
+        })
+        drawerOverlay.addView(drawerActions, LinearLayout.LayoutParams(-1, dp(36)))
+
+        drawerSearch = EditText(this).apply {
             hint = "Search apps"
             setSingleLine()
-            textSize = 15f
-            setTextColor(Color.WHITE)
+            textSize = 14f
+            typeface = UiTheme.font()
+            setTextColor(UiTheme.textPrimary)
             setHintTextColor(UiTheme.textMuted)
             setPadding(dp(14), 0, dp(14), 0)
             background = UiTheme.rounded(UiTheme.card, 22f, UiTheme.accent, 1)
         }
-        content.addView(search, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(10) })
-        search.addTextChangedListener(SearchWatcher { renderApps() })
-
-        val appScroll = ScrollView(this).apply {
-            overScrollMode = ScrollView.OVER_SCROLL_IF_CONTENT_SCROLLS
-        }
-        grid = GridLayout(this).apply {
-            columnCount = columns(engine.layout())
+        drawerOverlay.addView(drawerSearch, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(4); bottomMargin = dp(8) })
+        drawerSearch.addTextChangedListener(SearchWatcher { renderApps() })
+        val appScroll = ScrollView(this).apply { overScrollMode = ScrollView.OVER_SCROLL_IF_CONTENT_SCROLLS }
+        drawerGrid = GridLayout(this).apply {
+            columnCount = engine.homeColumns()
             alignmentMode = GridLayout.ALIGN_BOUNDS
             useDefaultMargins = false
         }
-        appScroll.addView(grid)
-        content.addView(appScroll, LinearLayout.LayoutParams(-1, 0, 1f))
-
-        dock = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(dp(4), dp(5), dp(4), dp(5))
-            UiTheme.styleCard(this, UiTheme.card, true)
-        }
-        content.addView(dock, LinearLayout.LayoutParams(-1, dp(68)).apply { topMargin = dp(8) })
-
-        root.setOnClickListener {
-            search.requestFocus()
-            val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
-            imm.showSoftInput(search, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
-        }
-        root.setOnTouchListener { view, event ->
-            if (event.action == MotionEvent.ACTION_DOWN) downY = event.y
-            if (event.action == MotionEvent.ACTION_UP && downY - event.y > dp(100)) {
-                view.performClick()
-                true
-            } else false
-        }
+        appScroll.addView(drawerGrid)
+        drawerOverlay.addView(appScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        drawerOverlay.addView(TextView(this).apply {
+            text = "Long-press an app to add a shortcut, place it on a page, add it to the dock, or hide it from this launcher."
+            textSize = 10f
+            typeface = UiTheme.font()
+            setTextColor(UiTheme.textMuted)
+            setPadding(dp(4), dp(8), dp(4), 0)
+        })
+        root.addView(drawerOverlay, FrameLayout.LayoutParams(-1, -1))
 
         setContentView(root)
+        updateAssistantCaption()
+        updateHomePageChrome()
         render()
+    }
+
+    private fun createHomePage(page: Int): LinearLayout {
+        val screen = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (page == currentPage) View.VISIBLE else View.GONE
+        }
+        val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(4), dp(4), dp(4), dp(8))
+        }
+        body.addView(TextView(this).apply {
+            text = if (page == 1) "SHORTCUTS  ·  main workspace" else "SHORTCUTS  ·  ${if (page == 0) "left" else "right"} workspace"
+            textSize = 10f
+            typeface = UiTheme.font()
+            setTextColor(UiTheme.textMuted)
+            setPadding(dp(4), dp(2), 0, dp(6))
+        })
+        val shortcuts = GridLayout(this).apply {
+            columnCount = engine.homeColumns()
+            alignmentMode = GridLayout.ALIGN_BOUNDS
+            useDefaultMargins = false
+        }
+        homeShortcutGrids += shortcuts
+        body.addView(shortcuts, LinearLayout.LayoutParams(-1, -2))
+        val widgets = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        pageWidgetContainers += widgets
+        body.addView(widgets, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        val hint = TextView(this).apply {
+            text = "Swipe between left, main, and right pages. Open Apps and long-press an icon to place a shortcut here. Add installed Android widgets from + Widget."
+            textSize = 11f
+            typeface = UiTheme.font()
+            setTextColor(UiTheme.textMuted)
+            gravity = Gravity.CENTER
+            setPadding(dp(20), dp(22), dp(20), dp(22))
+            background = UiTheme.rounded(UiTheme.card2, 18f)
+        }
+        body.addView(hint, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        scroll.addView(body)
+        screen.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+        return screen
+    }
+
+    private fun smallControl(label: String, width: Int, action: () -> Unit): Button = Button(this).apply {
+        text = label
+        textSize = if (label.length > 6) 9f else 11f
+        setTextColor(UiTheme.textPrimary)
+        background = UiTheme.rounded(UiTheme.card, 15f, UiTheme.accent, 1)
+        setOnClickListener { action() }
+        layoutParams = LinearLayout.LayoutParams(dp(width), dp(34)).apply { leftMargin = dp(3); rightMargin = dp(2) }
+    }
+
+    private fun smallControlWithView(label: String, width: Int, action: (View) -> Unit): Button = Button(this).apply {
+        text = label
+        textSize = 9f
+        setTextColor(UiTheme.textPrimary)
+        background = UiTheme.rounded(UiTheme.card, 15f, UiTheme.accent, 1)
+        setOnClickListener { action(this) }
+        layoutParams = LinearLayout.LayoutParams(dp(width), dp(34)).apply { leftMargin = dp(3); rightMargin = dp(2) }
     }
 
     private fun updateAssistantCaption() {
@@ -524,7 +652,7 @@ class MainActivity : Activity() {
                 setTextColor(Color.WHITE)
             })
             addView(TextView(this@MainActivity).apply {
-                text = "Palette preview. Optional wallpaper art can be imported locally or searched under an open license."
+                text = "${values.typography} type · ${values.iconStyle} icons · ${values.backgroundStyle} background. Optional wallpaper art can be imported locally or searched under an open license."
                 textSize = 11f
                 setTextColor(Color.LTGRAY)
                 setPadding(0, dp(3), 0, dp(12))
@@ -580,24 +708,83 @@ class MainActivity : Activity() {
                     .put("accent2", values.accent2)
                     .put("card", values.card)
                     .put("style", values.style)
+                    .put("typography", values.typography)
+                    .put("iconStyle", values.iconStyle)
+                    .put("backgroundStyle", values.backgroundStyle)
             )).toString()
         ).getOrThrow()
     }
 
+    @Deprecated("Back dispatch is retained for this API-30-only launcher.")
+    override fun onBackPressed() {
+        if (drawerShowing) hideDrawer() else super.onBackPressed()
+    }
+
+    private fun setHomePage(requested: Int) {
+        val target = requested.coerceIn(0, 2)
+        if (target == currentPage) return
+        val previous = currentPage
+        currentPage = target
+        engine.setHomePage(target)
+        homePages.forEachIndexed { index, page ->
+            if (index == target) {
+                page.visibility = View.VISIBLE
+                page.alpha = 0f
+                page.translationX = if (target > previous) dp(42).toFloat() else -dp(42).toFloat()
+                page.animate().alpha(1f).translationX(0f).setDuration(170).start()
+            } else page.visibility = View.GONE
+        }
+        updateHomePageChrome()
+        renderHomeShortcuts()
+        renderWidgets()
+    }
+
+    private fun updateHomePageChrome() {
+        if (::pageTitle.isInitialized) pageTitle.text = "HOME  ·  ${listOf("LEFT PAGE", "MAIN PAGE", "RIGHT PAGE")[currentPage]}"
+        if (::content.isInitialized && content.childCount > 5) {
+            val tabs = content.getChildAt(5) as? LinearLayout
+            if (tabs != null) for (index in 0 until tabs.childCount) {
+                (tabs.getChildAt(index) as? TextView)?.setTextColor(if (index == currentPage) UiTheme.accent else UiTheme.textMuted)
+            }
+        }
+        homePages.forEachIndexed { index, page -> page.visibility = if (index == currentPage) View.VISIBLE else View.GONE }
+    }
+
+    private fun showDrawer() {
+        if (!::drawerOverlay.isInitialized) return
+        drawerShowing = true
+        drawerOverlay.visibility = View.VISIBLE
+        renderApps()
+    }
+
+    private fun hideDrawer() {
+        if (!::drawerOverlay.isInitialized) return
+        drawerShowing = false
+        drawerOverlay.visibility = View.GONE
+    }
+
     private fun render() {
+        if (!::root.isInitialized) return
         UiTheme.bind(engine)
-        (root.getChildAt(0) as? ImageView)?.setImageBitmap(
-            assets.activeWallpaper()?.let { ImageAssetValidation.decodeSampled(it, 2048) }
-        )
+        (root.getChildAt(0) as? ImageView)?.apply {
+            background = UiTheme.homeBackground()
+            setImageBitmap(assets.activeWallpaper()?.let { ImageAssetValidation.decodeSampled(it, 2048) })
+        }
         (root.getChildAt(1) as? FrameLayout)?.setBackgroundColor(
-            Color.argb(150, Color.red(UiTheme.bg), Color.green(UiTheme.bg), Color.blue(UiTheme.bg))
+            Color.argb(72, Color.red(UiTheme.bg), Color.green(UiTheme.bg), Color.blue(UiTheme.bg))
         )
+        if (::drawerOverlay.isInitialized) drawerOverlay.background = UiTheme.homeBackground()
+        updateAssistantCaption()
+        updateHomePageChrome()
+        renderHomeShortcuts()
         renderApps()
         renderDock()
         renderWidgets()
     }
 
     private fun addAndroidWidget() {
+        pendingWidgetPage = currentPage
+        hideDrawer()
         pendingWidgetId = widgetHost.allocateAppWidgetId()
         try {
             startActivityForResult(
@@ -655,44 +842,43 @@ class MainActivity : Activity() {
     }
 
     private fun finishAddingWidget(id: Int) {
-        val values = widgetIds().toMutableSet().apply { add(id) }
-        getSharedPreferences("launcher_state", MODE_PRIVATE).edit()
-            .putStringSet("app_widget_ids", values.map { it.toString() }.toSet()).apply()
+        workspaceStore.addWidget(id, pendingWidgetPage)
         pendingWidgetId = -1
+        currentPage = pendingWidgetPage
+        engine.setHomePage(currentPage)
+        updateHomePageChrome()
         renderWidgets()
-        Toast.makeText(this, "Widget added", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Widget added to the ${listOf("left", "main", "right")[currentPage]} page", Toast.LENGTH_SHORT).show()
     }
 
-    private fun widgetIds(): Set<Int> = getSharedPreferences("launcher_state", MODE_PRIVATE)
-        .getStringSet("app_widget_ids", emptySet())?.mapNotNull { it.toIntOrNull() }?.toSet() ?: emptySet()
-
     private fun renderWidgets() {
-        if (!::widgetContainer.isInitialized || !::widgetHost.isInitialized || !::widgetManager.isInitialized) return
-        widgetContainer.removeAllViews()
-        val ids = widgetIds().sorted()
-        widgetContainer.visibility = if (ids.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
-        ids.forEach { id ->
+        if (!::widgetHost.isInitialized || !::widgetManager.isInitialized || pageWidgetContainers.size != 3) return
+        pageWidgetContainers.forEach { it.removeAllViews() }
+        workspaceStore.widgetIds().sorted().forEach { id ->
+            val page = workspaceStore.widgetPage(id)
+            val container = pageWidgetContainers.getOrNull(page) ?: return@forEach
             val info = widgetManager.getAppWidgetInfo(id) ?: return@forEach
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(8), dp(4), dp(8), dp(6))
+                setPadding(dp(8), dp(5), dp(8), dp(7))
                 UiTheme.styleCard(this, UiTheme.card, true)
             }
             val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
             header.addView(TextView(this).apply {
                 text = info.loadLabel(packageManager)
                 textSize = 11f
+                typeface = UiTheme.font()
                 setTextColor(UiTheme.textMuted)
                 layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
             })
-            header.addView(actionButton("Remove") { confirmRemoveWidget(id, info.loadLabel(packageManager).toString()) })
+            header.addView(smallControl("Remove", 64) { confirmRemoveWidget(id, info.loadLabel(packageManager).toString()) })
             card.addView(header)
             val hostView = widgetHost.createView(this, id, info).apply {
                 setAppWidget(id, info)
                 contentDescription = "${info.loadLabel(packageManager)} home-screen widget"
             }
-            card.addView(hostView, LinearLayout.LayoutParams(-1, dp(info.minHeight.coerceAtLeast(72))))
-            widgetContainer.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
+            card.addView(hostView, LinearLayout.LayoutParams(-1, info.minHeight.coerceAtLeast(dp(72))))
+            container.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) })
         }
     }
 
@@ -702,85 +888,106 @@ class MainActivity : Activity() {
             .setMessage("Remove $label from this launcher's home screen?")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Remove") { _, _ ->
-                val remaining = widgetIds().toMutableSet().apply { remove(id) }
-                getSharedPreferences("launcher_state", MODE_PRIVATE).edit()
-                    .putStringSet("app_widget_ids", remaining.map { it.toString() }.toSet()).apply()
+                workspaceStore.removeWidget(id)
                 widgetHost.deleteAppWidgetId(id)
                 renderWidgets()
             }
             .show()
     }
 
-    private fun renderApps() {
-        if (!::grid.isInitialized) return
-        grid.removeAllViews()
-        grid.columnCount = columns(engine.layout())
-        val q = search.text?.toString()?.trim()?.lowercase(Locale.getDefault()).orEmpty()
-        val hidden = engine.hiddenPackages()
-        apps.listLaunchableApps()
-            .filterNot { hidden.contains(it.packageName) }
-            .filter { q.isEmpty() || it.label.lowercase(Locale.getDefault()).contains(q) }
-            .forEach { addApp(it) }
+    private fun renderHomeShortcuts() {
+        if (homeShortcutGrids.size != 3) return
+        val allApps = apps.listLaunchableApps()
+        val columns = engine.homeColumns()
+        homeShortcutGrids.forEachIndexed { page, pageGrid ->
+            pageGrid.removeAllViews()
+            pageGrid.columnCount = columns
+            workspaceStore.shortcuts(page).forEach { placement ->
+                val app = allApps.firstOrNull { it.packageName == placement.packageName && it.activityName == placement.activityName }
+                    ?: allApps.firstOrNull { it.packageName == placement.packageName } ?: return@forEach
+                pageGrid.addView(createAppTile(app, engine.showLabels()) {
+                    apps.launch(app)
+                }.apply {
+                    setOnLongClickListener { showHomeShortcutMenu(placement, app); true }
+                }, GridLayout.LayoutParams().apply {
+                    width = 0
+                    height = GridLayout.LayoutParams.WRAP_CONTENT
+                    columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
+                    setMargins(dp(3), dp(3), dp(3), dp(3))
+                })
+            }
+            pageGrid.invalidate()
+        }
     }
 
-    private fun addApp(app: AppInfo) {
-        val card = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(5), dp(7), dp(5), dp(5))
-            UiTheme.styleCard(this, UiTheme.card, false)
-            setOnClickListener { apps.launch(app) }
-            setOnLongClickListener { showAppMenu(app); true }
+    private fun renderApps() {
+        if (!::drawerGrid.isInitialized) return
+        drawerSearch.visibility = if (engine.drawerSearchVisible()) View.VISIBLE else View.GONE
+        drawerGrid.removeAllViews()
+        drawerGrid.columnCount = engine.homeColumns()
+        val q = if (engine.drawerSearchVisible()) drawerSearch.text?.toString()?.trim()?.lowercase(Locale.getDefault()).orEmpty() else ""
+        val hidden = engine.hiddenPackages()
+        val candidates = apps.listLaunchableApps().filterNot { hidden.contains(it.packageName) }
+            .filter { q.isEmpty() || it.label.lowercase(Locale.getDefault()).contains(q) || it.packageName.lowercase(Locale.getDefault()).contains(q) }
+        val visible = when (engine.drawerSort()) {
+            "Z–A" -> candidates.sortedByDescending { it.label.lowercase(Locale.getDefault()) }
+            "Package" -> candidates.sortedWith(compareBy<AppInfo> { it.packageName.lowercase(Locale.getDefault()) }.thenBy { it.label.lowercase(Locale.getDefault()) })
+            else -> candidates.sortedWith(compareBy<AppInfo> { it.label.lowercase(Locale.getDefault()) }.thenBy { it.packageName })
         }
-        val pack = engine.installedIconPack()
-        val packIcon = if (pack.isNotBlank()) {
-            iconPacks.iconDrawable(pack, app.packageName, app.activityName)
-        } else null
-        card.addView(ImageView(this).apply {
-            setImageDrawable(assets.iconDrawable(app.packageName) ?: packIcon ?: app.icon)
-            contentDescription = app.label
-        }, LinearLayout.LayoutParams(dp(48), dp(48)))
-
-        if (engine.showLabels()) {
-            card.addView(TextView(this).apply {
-                text = app.label
-                textSize = 11f
-                gravity = Gravity.CENTER
-                setTextColor(UiTheme.textPrimary)
-                maxLines = 2
+        visible.forEach { app ->
+            drawerGrid.addView(createAppTile(app, engine.drawerLabels()) { apps.launch(app) }.apply {
+                setOnLongClickListener { showAppMenu(app); true }
+            }, GridLayout.LayoutParams().apply {
+                width = 0
+                height = GridLayout.LayoutParams.WRAP_CONTENT
+                columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
+                setMargins(dp(3), dp(3), dp(3), dp(3))
             })
         }
+    }
 
-        grid.addView(card, GridLayout.LayoutParams().apply {
-            width = 0
-            height = GridLayout.LayoutParams.WRAP_CONTENT
-            columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
-            setMargins(dp(3), dp(3), dp(3), dp(3))
-        })
+    private fun createAppTile(app: AppInfo, showLabel: Boolean, click: () -> Unit): LinearLayout {
+        val tile = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(4), dp(7), dp(4), dp(5))
+            setOnClickListener { click() }
+        }
+        val size = dp(engine.iconSize())
+        val pack = engine.installedIconPack().takeIf { it.isNotBlank() }?.let {
+            iconPacks.iconDrawable(it, app.packageName, app.activityName)
+        }
+        val icon = ImageView(this).apply {
+            setImageDrawable(assets.iconDrawable(app.packageName) ?: pack ?: app.icon)
+            contentDescription = app.label
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            background = UiTheme.rounded(UiTheme.card2, UiTheme.iconRadiusDp(size))
+            clipToOutline = true
+        }
+        tile.addView(icon, LinearLayout.LayoutParams(size, size))
+        if (showLabel) tile.addView(TextView(this).apply {
+            text = app.label
+            textSize = 10.5f
+            typeface = UiTheme.font()
+            gravity = Gravity.CENTER
+            setTextColor(UiTheme.textPrimary)
+            maxLines = 2
+            setPadding(0, dp(3), 0, 0)
+        }, LinearLayout.LayoutParams(-1, -2))
+        return tile
     }
 
     private fun showAppMenu(app: AppInfo) {
         AlertDialog.Builder(this)
             .setTitle(app.label)
-            .setItems(arrayOf("Launch", "Add to dock", "Hide app")) { _, which ->
+            .setItems(arrayOf("Launch", "Add shortcut to home", "Add to dock", "Hide app")) { _, which ->
                 when (which) {
                     0 -> apps.launch(app)
-                    1 -> {
-                        applyLauncherAction(
-                            org.json.JSONObject()
-                                .put("action", "ADD_SHORTCUT")
-                                .put("label", app.label)
-                                .put("package", app.packageName)
-                                .put("activity", app.activityName)
-                        )
-                        renderDock()
-                    }
-                    2 -> {
-                        applyLauncherAction(
-                            org.json.JSONObject()
-                                .put("action", "HIDE_APPS")
-                                .put("packages", org.json.JSONArray().put(app.packageName))
-                        )
+                    1 -> chooseHomePage(app)
+                    2 -> { addDockShortcut(app); renderDock() }
+                    3 -> {
+                        engine.setAppVisible(app.packageName, false)
                         renderApps()
                     }
                 }
@@ -788,82 +995,154 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun applyLauncherAction(action: org.json.JSONObject) {
-        engine.applyJson(
-            org.json.JSONObject()
-                .put("actions", org.json.JSONArray().put(action))
-                .toString()
+    private fun showHomeShortcutMenu(placement: WorkspaceStore.Shortcut, app: AppInfo) {
+        AlertDialog.Builder(this)
+            .setTitle(app.label)
+            .setItems(arrayOf("Launch", "Move to another page", "Move earlier", "Move later", "Add to dock", "Remove from home")) { _, which ->
+                when (which) {
+                    0 -> apps.launch(app)
+                    1 -> chooseHomePage(app, placement.page)
+                    2 -> { workspaceStore.shift(placement.packageName, placement.activityName, -1); renderHomeShortcuts() }
+                    3 -> { workspaceStore.shift(placement.packageName, placement.activityName, 1); renderHomeShortcuts() }
+                    4 -> { addDockShortcut(app); renderDock() }
+                    5 -> {
+                        workspaceStore.remove(placement.packageName, placement.activityName)
+                        renderHomeShortcuts()
+                    }
+                }
+            }
+            .show()
+    }
+
+    private fun chooseHomePage(app: AppInfo, current: Int? = null) {
+        val names = arrayOf("Left page", "Main page", "Right page")
+        AlertDialog.Builder(this)
+            .setTitle(if (current == null) "Add ${app.label} to…" else "Move ${app.label} to…")
+            .setItems(names) { _, page ->
+                val alreadyPlaced = workspaceStore.shortcuts().any { it.packageName == app.packageName && it.activityName == app.activityName }
+                val count = workspaceStore.shortcuts(page).size
+                if (!alreadyPlaced && count >= engine.homeRows() * engine.homeColumns()) {
+                    Toast.makeText(this, "That page is full. Increase its grid capacity in Settings.", Toast.LENGTH_LONG).show()
+                    return@setItems
+                }
+                workspaceStore.addOrMove(app.label, app.packageName, app.activityName, page)
+                renderHomeShortcuts()
+                setHomePage(page)
+                Toast.makeText(this, "Shortcut placed on the ${names[page].lowercase()}", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    private fun addDockShortcut(app: AppInfo) {
+        applyLauncherAction(
+            org.json.JSONObject().put("action", "ADD_SHORTCUT").put("label", app.label)
+                .put("package", app.packageName).put("activity", app.activityName)
         )
+        Toast.makeText(this, "Added to dock", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun applyLauncherAction(action: org.json.JSONObject) {
+        engine.applyJson(org.json.JSONObject().put("actions", org.json.JSONArray().put(action)).toString())
     }
 
     private fun renderDock() {
+        if (!::dock.isInitialized) return
         dock.removeAllViews()
+        dock.visibility = if (engine.dockVisible()) View.VISIBLE else View.GONE
         val allApps = apps.listLaunchableApps()
         val items = engine.shortcuts().take(engine.dockCount())
         items.forEach { item ->
             val pkg = item.optString("package")
-            val app = allApps.firstOrNull { it.packageName == pkg } ?: return@forEach
-            val pack = engine.installedIconPack()
-            val packIcon = if (pack.isNotBlank()) {
-                iconPacks.iconDrawable(pack, app.packageName, app.activityName)
-            } else null
+            val activity = item.optString("activity")
+            val app = allApps.firstOrNull { it.packageName == pkg && (activity.isBlank() || it.activityName == activity) }
+                ?: allApps.firstOrNull { it.packageName == pkg } ?: return@forEach
+            val pack = engine.installedIconPack().takeIf { it.isNotBlank() }?.let {
+                iconPacks.iconDrawable(it, app.packageName, app.activityName)
+            }
             dock.addView(ImageButton(this).apply {
-                setImageDrawable(assets.iconDrawable(app.packageName) ?: packIcon ?: app.icon)
+                setImageDrawable(assets.iconDrawable(app.packageName) ?: pack ?: app.icon)
                 contentDescription = item.optString("label", app.label)
                 background = UiTheme.rounded(Color.TRANSPARENT, 16f)
+                setPadding(dp(6), dp(6), dp(6), dp(6))
                 setOnClickListener { apps.launch(app) }
                 setOnLongClickListener {
-                    applyLauncherAction(
-                        org.json.JSONObject()
-                            .put("action", "REMOVE_SHORTCUT")
-                            .put("label", item.optString("label"))
-                            .put("package", pkg)
-                    )
-                    renderDock()
+                    AlertDialog.Builder(this@MainActivity).setTitle(app.label)
+                        .setMessage("Remove this app shortcut from the dock?")
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Remove") { _, _ ->
+                            applyLauncherAction(org.json.JSONObject().put("action", "REMOVE_SHORTCUT")
+                                .put("label", item.optString("label")).put("package", pkg))
+                            renderDock()
+                        }.show()
                     true
                 }
-                layoutParams = LinearLayout.LayoutParams(0, dp(56), 1f).apply {
-                    leftMargin = dp(2)
-                    rightMargin = dp(2)
+                layoutParams = LinearLayout.LayoutParams(0, dp(54), 1f).apply {
+                    leftMargin = dp(2); rightMargin = dp(2)
                 }
             })
         }
-        if (items.size < engine.dockCount()) {
+        if (engine.dockVisible() && items.size < engine.dockCount()) {
             dock.addView(TextView(this).apply {
                 text = "+"
-                textSize = 26f
+                textSize = 24f
                 gravity = Gravity.CENTER
                 setTextColor(UiTheme.accent)
-                setOnClickListener {
-                    Toast.makeText(
-                        this@MainActivity,
-                        "Long-press an app to add it to the dock",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                }
-                layoutParams = LinearLayout.LayoutParams(0, dp(56), 1f)
+                contentDescription = "Add an app shortcut to the dock"
+                setOnClickListener { showDrawer() }
+                layoutParams = LinearLayout.LayoutParams(0, dp(54), 1f)
             })
         }
     }
 
-    private fun actionButton(label: String, action: () -> Unit) = Button(this).apply {
-        text = label
-        textSize = 10f
-        setTextColor(Color.WHITE)
-        background = UiTheme.rounded(UiTheme.card, 18f, UiTheme.accent, 1)
-        setOnClickListener { action() }
-        layoutParams = LinearLayout.LayoutParams(dp(82), dp(40)).apply { leftMargin = dp(4) }
-    }
-
-    private fun columns(layout: String) = when (layout.lowercase(Locale.getDefault())) {
-        "dense", "compact" -> 5
-        "wide" -> 3
-        else -> 4
-    }
 }
 
 private class SearchWatcher(private val changed: () -> Unit) : android.text.TextWatcher {
     override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
     override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = changed()
     override fun afterTextChanged(s: android.text.Editable?) = Unit
+}
+
+@SuppressLint("ViewConstructor")
+private class SwipeWorkspaceLayout(
+    context: android.content.Context,
+    private val onSwipe: (towardRight: Boolean) -> Unit
+) : FrameLayout(context) {
+    private var startX = 0f
+    private var startY = 0f
+    private var isHorizontalSwipe = false
+    private val threshold = (58 * resources.displayMetrics.density).toInt()
+
+    override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                startX = event.x
+                startY = event.y
+                isHorizontalSwipe = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.x - startX
+                val dy = event.y - startY
+                if (kotlin.math.abs(dx) > threshold && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.25f) {
+                    isHorizontalSwipe = true
+                    return true
+                }
+            }
+        }
+        return super.onInterceptTouchEvent(event)
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_UP) {
+            if (isHorizontalSwipe) onSwipe(event.x > startX) else performClick()
+            isHorizontalSwipe = false
+            return true
+        }
+        if (event.actionMasked == MotionEvent.ACTION_CANCEL) isHorizontalSwipe = false
+        return true
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
+    }
 }

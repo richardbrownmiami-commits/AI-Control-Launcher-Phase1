@@ -16,7 +16,7 @@ Return exactly one JSON object and no markdown, using this shape:
 Schema and safety rules:
 - Always include message, clarification, theme, and actions. Use null when clarification or theme is not needed.
 - If information is missing or ambiguous, set clarification to one concise question, set theme to null, and actions to []. Do not guess or propose changes until clarified.
-- For a new palette use theme={"operation":"CREATE","name":"...","background":"#RRGGBB","accent":"#RRGGBB","accent2":"#RRGGBB","card":"#RRGGBB","style":"glass|flat|neon"}. Use a valid 1-40 character theme name, hex colors, and one supported style.
+- For a new palette use theme={"operation":"CREATE","name":"...","background":"#RRGGBB","accent":"#RRGGBB","accent2":"#RRGGBB","card":"#RRGGBB","style":"glass|flat|neon","typography":"system|compact|serif","iconStyle":"rounded|circle|squircle","backgroundStyle":"gradient|solid|aurora|warm"}. Name/colors/style are required only as specified by the validator; omitted attributes use a safe preset.
 - To switch to a theme already listed in launcher state use theme={"operation":"APPLY","name":"exact available name"}.
 - The only allowed actions are:
   {"type":"SEARCH_ASSETS","query":"3-120 character descriptive search phrase"}

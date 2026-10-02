@@ -9,7 +9,12 @@ import com.aicontrol.launcher.theme.ThemeSpec
 import org.json.JSONArray
 import org.json.JSONObject
 
- data class ThemeState(val bg: Int, val accent: Int, val accent2: Int, val card: Int, val style: String)
+data class ThemeState(
+    val bg: Int, val accent: Int, val accent2: Int, val card: Int, val style: String,
+    val typography: String = ThemeSpec.DEFAULT_TYPOGRAPHY,
+    val iconStyle: String = ThemeSpec.DEFAULT_ICON_STYLE,
+    val backgroundStyle: String = ThemeSpec.DEFAULT_BACKGROUND_STYLE
+)
 
 class ActionEngine(context: Context) {
     private val appContext = context.applicationContext
@@ -54,7 +59,10 @@ class ActionEngine(context: Context) {
                         accent = action.optString("accent", ThemeSpec.DEFAULT_ACCENT),
                         accent2 = action.optString("accent2", ThemeSpec.DEFAULT_ACCENT2),
                         card = action.optString("card", ThemeSpec.DEFAULT_CARD),
-                        style = action.optString("style", ThemeSpec.DEFAULT_STYLE)
+                        style = action.optString("style", ThemeSpec.DEFAULT_STYLE),
+                        typography = action.optString("typography", ThemeSpec.DEFAULT_TYPOGRAPHY),
+                        iconStyle = action.optString("iconStyle", ThemeSpec.DEFAULT_ICON_STYLE),
+                        backgroundStyle = action.optString("backgroundStyle", ThemeSpec.DEFAULT_BACKGROUND_STYLE)
                     )
                     saveTheme(values)
                     applied++
@@ -151,15 +159,10 @@ class ActionEngine(context: Context) {
                 it.nameWithoutExtension != values.name
         }
         require(conflictingCustomName == null) { "A custom theme with the same name already exists; use the exact spelling to replace it." }
-        val data = JSONObject()
-            .put("name", values.name)
-            .put("bg", values.background)
-            .put("accent", values.accent)
-            .put("accent2", values.accent2)
-            .put("card", values.card)
-            .put("style", values.style)
+        val data = themeJson(values)
+        recordThemeForRollback()
         store.themeFile(values.name).writeText(data.toString())
-        prefs.edit().putString("theme", values.name).apply()
+        prefs.edit().putString("theme", values.name).putString("style", values.style).apply()
     }
 
     private fun addHidden(packageName: String) {
@@ -182,7 +185,13 @@ class ActionEngine(context: Context) {
 
     private fun addShortcut(label: String, packageName: String, activity: String) {
         require(label.isNotBlank() && packageName.isNotBlank()) { "Shortcut label/package required" }
-        val shortcuts = JSONArray(prefs.getString("shortcuts", "[]") ?: "[]")
+        val old = JSONArray(prefs.getString("shortcuts", "[]") ?: "[]")
+        val shortcuts = JSONArray()
+        for (index in 0 until old.length()) {
+            val item = old.optJSONObject(index) ?: continue
+            if (item.optString("package") == packageName) continue
+            shortcuts.put(item)
+        }
         shortcuts.put(JSONObject().put("label", label).put("package", packageName).put("activity", activity))
         prefs.edit().putString("shortcuts", shortcuts.toString()).apply()
     }
@@ -212,13 +221,21 @@ class ActionEngine(context: Context) {
     fun installedIconPack(): String = prefs.getString("installed_icon_pack", "") ?: ""
     fun showLabels(): Boolean = prefs.getBoolean("show_labels", true)
     fun dockCount(): Int = prefs.getInt("dock_count", 5)
+    fun homeRows(): Int = prefs.getInt("home_rows", 5).coerceIn(3, 8)
+    fun homeColumns(): Int = prefs.getInt("home_columns", 4).coerceIn(3, 7)
+    fun iconSize(): Int = prefs.getInt("icon_size", 48).coerceIn(32, 72)
+    fun dockVisible(): Boolean = prefs.getBoolean("dock_visible", true)
+    fun homePage(): Int = prefs.getInt("home_page", 1).coerceIn(0, 2)
+    fun drawerSort(): String = prefs.getString("drawer_sort", "A–Z") ?: "A–Z"
+    fun drawerSearchVisible(): Boolean = prefs.getBoolean("drawer_search", true)
+    fun drawerLabels(): Boolean = prefs.getBoolean("drawer_labels", true)
 
     fun availableThemes(): Set<String> {
         val custom = store.themes.listFiles()?.filter { it.isFile && it.extension.equals("json", true) }
             ?.map { it.nameWithoutExtension }?.toSet() ?: emptySet()
         val ordered = linkedMapOf<String, String>()
         custom.sorted().forEach { ordered.putIfAbsent(it.lowercase(), it) }
-        listOf("default", "midnight", "ocean", "ember").forEach { ordered.putIfAbsent(it, it) }
+        ThemeSpec.builtInNames.forEach { ordered.putIfAbsent(it, it) }
         return ordered.values.toSet()
     }
 
@@ -226,7 +243,8 @@ class ActionEngine(context: Context) {
         val requested = value.trim()
         require(availableThemes().any { it.equals(requested, ignoreCase = true) }) { "Unknown theme '$requested'" }
         val stored = availableThemes().first { it.equals(requested, ignoreCase = true) }
-        prefs.edit().putString("theme", stored).apply()
+        if (!theme().equals(stored, ignoreCase = true)) recordThemeForRollback()
+        prefs.edit().putString("theme", stored).putString("style", themeValues(stored).style).apply()
     }
 
     fun setStyle(value: String) {
@@ -238,7 +256,8 @@ class ActionEngine(context: Context) {
     fun setLayout(value: String) {
         val normalized = value.trim().lowercase()
         require(normalized in setOf("grid", "compact", "dense", "wide")) { "Unsupported layout '$value'" }
-        prefs.edit().putString("layout", normalized).apply()
+        val defaultColumns = when (normalized) { "dense", "compact" -> 5; "wide" -> 3; else -> 4 }
+        prefs.edit().putString("layout", normalized).putInt("home_columns", defaultColumns).apply()
     }
 
     fun setAppVisible(packageName: String, visible: Boolean) {
@@ -249,38 +268,90 @@ class ActionEngine(context: Context) {
     fun setInstalledIconPack(value: String) { prefs.edit().putString("installed_icon_pack", value).apply() }
     fun setShowLabels(value: Boolean) { prefs.edit().putBoolean("show_labels", value).apply() }
     fun setDockCount(value: Int) { prefs.edit().putInt("dock_count", value.coerceIn(3, 6)).apply() }
+    fun setHomeRows(value: Int) { prefs.edit().putInt("home_rows", value.coerceIn(3, 8)).apply() }
+    fun setHomeColumns(value: Int) { prefs.edit().putInt("home_columns", value.coerceIn(3, 7)).apply() }
+    fun setIconSize(value: Int) { prefs.edit().putInt("icon_size", value.coerceIn(32, 72)).apply() }
+    fun setDockVisible(value: Boolean) { prefs.edit().putBoolean("dock_visible", value).apply() }
+    fun setHomePage(value: Int) { prefs.edit().putInt("home_page", value.coerceIn(0, 2)).apply() }
+    fun setDrawerSort(value: String) {
+        require(value in setOf("A–Z", "Z–A", "Package")) { "Unsupported app drawer sort order." }
+        prefs.edit().putString("drawer_sort", value).apply()
+    }
+    fun setDrawerSearchVisible(value: Boolean) { prefs.edit().putBoolean("drawer_search", value).apply() }
+    fun setDrawerLabels(value: Boolean) { prefs.edit().putBoolean("drawer_labels", value).apply() }
+
+    fun hasThemeRollback(): Boolean = !prefs.getString("theme_rollback_snapshot", null).isNullOrBlank()
+    fun rollbackTheme(): Boolean {
+        val raw = prefs.getString("theme_rollback_snapshot", null) ?: return false
+        return runCatching {
+            val snapshot = JSONObject(raw)
+            val name = snapshot.getString("name")
+            val values = ThemeSpec.validate(
+                name = name,
+                background = snapshot.getString("bg"),
+                accent = snapshot.getString("accent"),
+                accent2 = snapshot.getString("accent2"),
+                card = snapshot.getString("card"),
+                style = snapshot.getString("style"),
+                typography = snapshot.getString("typography"),
+                iconStyle = snapshot.getString("iconStyle"),
+                backgroundStyle = snapshot.getString("backgroundStyle")
+            )
+            val customFile = store.themeFile(name)
+            if (snapshot.optBoolean("custom", false)) customFile.writeText(themeJson(values).toString())
+            else if (customFile.isFile) customFile.delete()
+            prefs.edit().remove("theme_rollback_snapshot").putString("theme", name)
+                .putString("style", snapshot.optString("activeStyle", values.style)).apply()
+            true
+        }.getOrDefault(false)
+    }
+
+    private fun recordThemeForRollback() {
+        val current = theme()
+        val values = runCatching { themeValues(current) }.getOrNull() ?: return
+        val snapshot = themeJson(values)
+            .put("custom", store.themeFile(current).isFile)
+            .put("activeStyle", style())
+        prefs.edit().putString("theme_rollback_snapshot", snapshot.toString()).apply()
+    }
+
+    private fun themeJson(values: ThemeSpec.Values) = JSONObject()
+        .put("name", values.name)
+        .put("bg", values.background)
+        .put("accent", values.accent)
+        .put("accent2", values.accent2)
+        .put("card", values.card)
+        .put("style", values.style)
+        .put("typography", values.typography)
+        .put("iconStyle", values.iconStyle)
+        .put("backgroundStyle", values.backgroundStyle)
+
+    fun themeValues(name: String = theme()): ThemeSpec.Values {
+        val customFile = store.themeFile(name)
+        if (customFile.isFile) return runCatching {
+            val json = JSONObject(customFile.readText())
+            ThemeSpec.validate(
+                name = json.optString("name", name),
+                background = json.optString("bg", ThemeSpec.DEFAULT_BACKGROUND),
+                accent = json.optString("accent", ThemeSpec.DEFAULT_ACCENT),
+                accent2 = json.optString("accent2", ThemeSpec.DEFAULT_ACCENT2),
+                card = json.optString("card", ThemeSpec.DEFAULT_CARD),
+                style = json.optString("style", ThemeSpec.DEFAULT_STYLE),
+                typography = json.optString("typography", ThemeSpec.DEFAULT_TYPOGRAPHY),
+                iconStyle = json.optString("iconStyle", ThemeSpec.DEFAULT_ICON_STYLE),
+                backgroundStyle = json.optString("backgroundStyle", ThemeSpec.DEFAULT_BACKGROUND_STYLE)
+            )
+        }.getOrElse { ThemeSpec.builtIn(name) ?: ThemeSpec.validate(name) }
+        return ThemeSpec.builtIn(name) ?: ThemeSpec.validate(name)
+    }
 
     fun themeState(): ThemeState {
-        val storedStyle = prefs.getString("style", ThemeSpec.DEFAULT_STYLE)?.lowercase()
-        val safeStyle = storedStyle?.takeIf { it in ThemeSpec.styles } ?: ThemeSpec.DEFAULT_STYLE
-        val default = ThemeState(
-            Color.rgb(8, 10, 18), Color.rgb(70, 210, 255), Color.rgb(155, 92, 255),
-            Color.rgb(20, 23, 35), safeStyle
+        val values = runCatching { themeValues() }.getOrElse { ThemeSpec.validate("default") }
+        return ThemeState(
+            Color.parseColor(values.background), Color.parseColor(values.accent), Color.parseColor(values.accent2),
+            Color.parseColor(values.card), prefs.getString("style", null)?.takeIf { it in ThemeSpec.styles } ?: values.style,
+            values.typography, values.iconStyle, values.backgroundStyle
         )
-        val customFile = store.themeFile(theme())
-        if (customFile.isFile) {
-            return runCatching {
-                val json = JSONObject(customFile.readText())
-                val values = ThemeSpec.validate(
-                    name = json.optString("name", theme()),
-                    background = json.optString("bg", ThemeSpec.DEFAULT_BACKGROUND),
-                    accent = json.optString("accent", ThemeSpec.DEFAULT_ACCENT),
-                    accent2 = json.optString("accent2", ThemeSpec.DEFAULT_ACCENT2),
-                    card = json.optString("card", ThemeSpec.DEFAULT_CARD),
-                    style = json.optString("style", ThemeSpec.DEFAULT_STYLE)
-                )
-                ThemeState(
-                    Color.parseColor(values.background), Color.parseColor(values.accent),
-                    Color.parseColor(values.accent2), Color.parseColor(values.card), values.style
-                )
-            }.getOrDefault(default)
-        }
-        return when (theme().lowercase()) {
-            "midnight" -> default.copy(bg = Color.rgb(5, 8, 14))
-            "ocean" -> default.copy(bg = Color.rgb(6, 24, 38), accent = Color.rgb(64, 214, 255))
-            "ember" -> default.copy(bg = Color.rgb(38, 16, 12), accent = Color.rgb(255, 130, 70), accent2 = Color.rgb(255, 70, 150))
-            else -> default
-        }
     }
 
     fun stateSummary(): String {
