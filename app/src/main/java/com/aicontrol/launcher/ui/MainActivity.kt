@@ -3,8 +3,8 @@ package com.aicontrol.launcher.ui
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
-import android.graphics.Color
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.os.Bundle
 import android.view.Gravity
 import android.view.MotionEvent
@@ -52,6 +52,7 @@ class MainActivity : Activity() {
     private fun buildUi() {
         UiTheme.bind(engine)
         root = FrameLayout(this)
+
         val wallpaper = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             assets.activeWallpaper()?.let { setImageBitmap(BitmapFactory.decodeFile(it.absolutePath)) }
@@ -76,8 +77,12 @@ class MainActivity : Activity() {
             setTextColor(UiTheme.textPrimary)
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         })
-        top.addView(actionButton("Customize") { startActivity(Intent(this@MainActivity, LauncherSettingsActivity::class.java)) })
-        top.addView(actionButton("Assets") { startActivity(Intent(this@MainActivity, AssetsActivity::class.java)) })
+        top.addView(actionButton("Customize") {
+            startActivity(Intent(this@MainActivity, LauncherSettingsActivity::class.java))
+        })
+        top.addView(actionButton("Assets") {
+            startActivity(Intent(this@MainActivity, AssetsActivity::class.java))
+        })
         content.addView(top, LinearLayout.LayoutParams(-1, dp(46)))
 
         content.addView(TextView(this).apply {
@@ -132,7 +137,7 @@ class MainActivity : Activity() {
                 val imm = getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
                 imm.showSoftInput(search, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
             }
-            true
+            false
         }
 
         setContentView(root)
@@ -141,11 +146,12 @@ class MainActivity : Activity() {
 
     private fun render() {
         UiTheme.bind(engine)
-        val wallpaper = root.getChildAt(0) as? ImageView
-        wallpaper?.setImageBitmap(assets.activeWallpaper()?.let { BitmapFactory.decodeFile(it.absolutePath) })
-        val shade = root.getChildAt(1) as? FrameLayout
-        shade?.setBackgroundColor(Color.argb(150, Color.red(UiTheme.bg), Color.green(UiTheme.bg), Color.blue(UiTheme.bg)))
-        content.background = null
+        (root.getChildAt(0) as? ImageView)?.setImageBitmap(
+            assets.activeWallpaper()?.let { BitmapFactory.decodeFile(it.absolutePath) }
+        )
+        (root.getChildAt(1) as? FrameLayout)?.setBackgroundColor(
+            Color.argb(150, Color.red(UiTheme.bg), Color.green(UiTheme.bg), Color.blue(UiTheme.bg))
+        )
         renderApps()
         renderDock()
     }
@@ -171,13 +177,15 @@ class MainActivity : Activity() {
             setOnClickListener { apps.launch(app) }
             setOnLongClickListener { showAppMenu(app); true }
         }
-        val icon = ImageView(this).apply {
-            val pack = engine.installedIconPack()
-            val themed = if (pack.isNotBlank()) iconPacks.iconDrawable(pack, app.packageName, app.activityName) else null
-            setImageDrawable(assets.iconDrawable(app.packageName) ?: themed ?: app.icon)
+        val pack = engine.installedIconPack()
+        val packIcon = if (pack.isNotBlank()) {
+            iconPacks.iconDrawable(pack, app.packageName, app.activityName)
+        } else null
+        card.addView(ImageView(this).apply {
+            setImageDrawable(assets.iconDrawable(app.packageName) ?: packIcon ?: app.icon)
             contentDescription = app.label
-        }
-        card.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)))
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
+
         if (engine.showLabels()) {
             card.addView(TextView(this).apply {
                 text = app.label
@@ -187,41 +195,120 @@ class MainActivity : Activity() {
                 maxLines = 2
             })
         }
-        val params = GridLayout.LayoutParams().apply {
+
+        grid.addView(card, GridLayout.LayoutParams().apply {
             width = 0
             height = GridLayout.LayoutParams.WRAP_CONTENT
             columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
             setMargins(dp(3), dp(3), dp(3), dp(3))
-        }
-        grid.addView(card, params)
+        })
     }
 
     private fun showAppMenu(app: AppInfo) {
-        val options = arrayOf("Launch", "Add to dock", "Hide app")
         AlertDialog.Builder(this)
             .setTitle(app.label)
-            .setItems(options) { _, which ->
+            .setItems(arrayOf("Launch", "Add to dock", "Hide app")) { _, which ->
                 when (which) {
                     0 -> apps.launch(app)
                     1 -> {
-                        val action = org.json.JSONObject()
-                            .put("action", "ADD_SHORTCUT")
-                            .put("label", app.label)
-                            .put("package", app.packageName)
-                            .put("activity", app.activityName)
-                        engine.applyJson(org.json.JSONObject()
-                            .put("actions", org.json.JSONArray().put(action)).toString())
+                        applyLauncherAction(
+                            org.json.JSONObject()
+                                .put("action", "ADD_SHORTCUT")
+                                .put("label", app.label)
+                                .put("package", app.packageName)
+                                .put("activity", app.activityName)
+                        )
                         renderDock()
                     }
                     2 -> {
-                        val action = org.json.JSONObject()
-                            .put("action", "HIDE_APPS")
-                            .put("packages", org.json.JSONArray().put(app.packageName))
-                        engine.applyJson(org.json.JSONObject()
-                            .put("actions", org.json.JSONArray().put(action)).toString())
+                        applyLauncherAction(
+                            org.json.JSONObject()
+                                .put("action", "HIDE_APPS")
+                                .put("packages", org.json.JSONArray().put(app.packageName))
+                        )
                         renderApps()
                     }
                 }
-            }.show()
+            }
+            .show()
     }
 
+    private fun applyLauncherAction(action: org.json.JSONObject) {
+        engine.applyJson(
+            org.json.JSONObject()
+                .put("actions", org.json.JSONArray().put(action))
+                .toString()
+        )
+    }
+
+    private fun renderDock() {
+        dock.removeAllViews()
+        val allApps = apps.listLaunchableApps()
+        val items = engine.shortcuts().take(engine.dockCount())
+        items.forEach { item ->
+            val pkg = item.optString("package")
+            val app = allApps.firstOrNull { it.packageName == pkg } ?: return@forEach
+            val pack = engine.installedIconPack()
+            val packIcon = if (pack.isNotBlank()) {
+                iconPacks.iconDrawable(pack, app.packageName, app.activityName)
+            } else null
+            dock.addView(ImageButton(this).apply {
+                setImageDrawable(assets.iconDrawable(app.packageName) ?: packIcon ?: app.icon)
+                contentDescription = item.optString("label", app.label)
+                background = UiTheme.rounded(Color.TRANSPARENT, 16f)
+                setOnClickListener { apps.launch(app) }
+                setOnLongClickListener {
+                    applyLauncherAction(
+                        org.json.JSONObject()
+                            .put("action", "REMOVE_SHORTCUT")
+                            .put("label", item.optString("label"))
+                            .put("package", pkg)
+                    )
+                    renderDock()
+                    true
+                }
+                layoutParams = LinearLayout.LayoutParams(0, dp(56), 1f).apply {
+                    leftMargin = dp(2)
+                    rightMargin = dp(2)
+                }
+            })
+        }
+        if (items.size < engine.dockCount()) {
+            dock.addView(TextView(this).apply {
+                text = "+"
+                textSize = 26f
+                gravity = Gravity.CENTER
+                setTextColor(UiTheme.accent)
+                setOnClickListener {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Long-press an app to add it to the dock",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                layoutParams = LinearLayout.LayoutParams(0, dp(56), 1f)
+            })
+        }
+    }
+
+    private fun actionButton(label: String, action: () -> Unit) = Button(this).apply {
+        text = label
+        textSize = 10f
+        setTextColor(Color.WHITE)
+        background = UiTheme.rounded(UiTheme.card, 18f, UiTheme.accent, 1)
+        setOnClickListener { action() }
+        layoutParams = LinearLayout.LayoutParams(dp(82), dp(40)).apply { leftMargin = dp(4) }
+    }
+
+    private fun columns(layout: String) = when (layout.lowercase(Locale.getDefault())) {
+        "dense", "compact" -> 5
+        "wide" -> 3
+        else -> 4
+    }
+}
+
+private class SearchWatcher(private val changed: () -> Unit) : android.text.TextWatcher {
+    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = changed()
+    override fun afterTextChanged(s: android.text.Editable?) = Unit
+}
