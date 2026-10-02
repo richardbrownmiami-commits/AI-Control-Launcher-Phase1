@@ -204,87 +204,24 @@ class MainActivity : Activity() {
                 when (which) {
                     0 -> apps.launch(app)
                     1 -> {
-                        engine.applyJson(org.json.JSONObject().put("actions",
-                            org.json.JSONArray().put(org.json.JSONObject()
-                                .put("action", "ADD_SHORTCUT")
-                                .put("label", app.label)
-                                .put("package", app.packageName)
-                                .put("activity", app.activityName)).toString()))
+                        val action = org.json.JSONObject()
+                            .put("action", "ADD_SHORTCUT")
+                            .put("label", app.label)
+                            .put("package", app.packageName)
+                            .put("activity", app.activityName)
+                        engine.applyJson(org.json.JSONObject()
+                            .put("actions", org.json.JSONArray().put(action)).toString())
                         renderDock()
                     }
                     2 -> {
-                        engine.applyJson(org.json.JSONObject().put("actions",
-                            org.json.JSONArray().put(org.json.JSONObject()
-                                .put("action", "HIDE_APPS")
-                                .put("packages", org.json.JSONArray().put(app.packageName))).toString()))
+                        val action = org.json.JSONObject()
+                            .put("action", "HIDE_APPS")
+                            .put("packages", org.json.JSONArray().put(app.packageName))
+                        engine.applyJson(org.json.JSONObject()
+                            .put("actions", org.json.JSONArray().put(action)).toString())
                         renderApps()
                     }
                 }
             }.show()
     }
 
-    private fun renderDock() {
-        dock.removeAllViews()
-        val items = engine.shortcuts().take(engine.dockCount())
-        items.forEach { item ->
-            val pkg = item.optString("package")
-            val app = apps.listLaunchableApps().firstOrNull { it.packageName == pkg } ?: return@forEach
-            dock.addView(ImageButton(this).apply {
-                val pack = engine.installedIconPack()
-                val themed = if (pack.isNotBlank()) iconPacks.iconDrawable(pack, app.packageName, app.activityName) else null
-                setImageDrawable(assets.iconDrawable(app.packageName) ?: themed ?: app.icon)
-                contentDescription = item.optString("label", app.label)
-                background = UiTheme.rounded(Color.TRANSPARENT, 16f)
-                setOnClickListener { apps.launch(app) }
-                setOnLongClickListener {
-                    engine.applyJson(org.json.JSONObject().put("actions",
-                        org.json.JSONArray().put(org.json.JSONObject()
-                            .put("action", "REMOVE_SHORTCUT")
-                            .put("label", item.optString("label"))
-                            .put("package", pkg)).toString()))
-                    renderDock()
-                    true
-                }
-                layoutParams = LinearLayout.LayoutParams(0, dp(56), 1f).apply {
-                    leftMargin = dp(2); rightMargin = dp(2)
-                }
-            })
-        }
-        if (items.size < engine.dockCount()) {
-            dock.addView(TextView(this).apply {
-                text = "+"
-                textSize = 26f
-                gravity = Gravity.CENTER
-                setTextColor(UiTheme.accent)
-                setOnClickListener { Toast.makeText(this@MainActivity, "Long-press an app to add it to the dock", Toast.LENGTH_SHORT).show() }
-                layoutParams = LinearLayout.LayoutParams(0, dp(56), 1f)
-            })
-        }
-    }
-
-    private fun actionButton(label: String, action: () -> Unit) = Button(this).apply {
-        text = label
-        textSize = 10f
-        setTextColor(Color.WHITE)
-        background = UiTheme.rounded(UiTheme.card, 18f, UiTheme.accent, 1)
-        setOnClickListener { action() }
-        layoutParams = LinearLayout.LayoutParams(dp(82), dp(40)).apply { leftMargin = dp(4) }
-    }
-
-    private fun columns(layout: String) = when (layout.lowercase(Locale.getDefault())) {
-        "dense" -> 5
-        "compact" -> 5
-        "wide" -> 3
-        else -> 4
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-    }
-}
-
-private class SearchWatcher(private val changed: () -> Unit) : android.text.TextWatcher {
-    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = changed()
-    override fun afterTextChanged(s: android.text.Editable?) = Unit
-}
