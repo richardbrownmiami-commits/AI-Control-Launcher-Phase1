@@ -2,6 +2,7 @@ package com.aicontrol.launcher.ui
 import android.app.Activity
 import android.graphics.Color
 import android.os.Bundle
+import android.view.View
 import android.text.InputType
 import android.widget.*
 import com.aicontrol.launcher.ai.*
@@ -14,10 +15,11 @@ class SettingsActivity:Activity(){
  private fun ui(){
   val r=LinearLayout(this).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(18),dp(18),dp(18),dp(18));background=UiTheme.gradient(0f)}
   r.addView(TextView(this).apply{text="AI Settings";textSize=26f;setTextColor(UiTheme.textPrimary)});r.addView(label("PROVIDER"))
-  radios=RadioGroup(this).apply{orientation=RadioGroup.HORIZONTAL};val o=RadioButton(this).apply{text="OpenRouter";setTextColor(UiTheme.textPrimary);id=1};val g=RadioButton(this).apply{text="Gemini";setTextColor(UiTheme.textPrimary);id=2};radios.addView(o);radios.addView(g);radios.check(if(s.provider==SettingsStore.PROVIDER_GEMINI)2 else 1);r.addView(radios)
+  val openRouterId=View.generateViewId();val geminiId=View.generateViewId()
+  radios=RadioGroup(this).apply{orientation=RadioGroup.HORIZONTAL};val o=RadioButton(this).apply{text="OpenRouter";setTextColor(UiTheme.textPrimary);id=openRouterId};val g=RadioButton(this).apply{text="Gemini";setTextColor(UiTheme.textPrimary);id=geminiId};radios.addView(o);radios.addView(g);radios.check(if(s.provider==SettingsStore.PROVIDER_GEMINI)geminiId else openRouterId);r.addView(radios)
   r.addView(label("FREE MODEL"));models=Spinner(this);r.addView(models);ok=key("OpenRouter API key");gk=key("Gemini API key");ok.setText(s.openRouterKey);gk.setText(s.geminiKey);r.addView(label("API KEYS"));r.addView(ok);r.addView(gk)
   fun refresh(p:String){val list=FreeModels.forProvider(p);models.adapter=ArrayAdapter(this,android.R.layout.simple_spinner_dropdown_item,list);val i=list.indexOf(s.model);models.setSelection(if(i>=0)i else 0)}
-  refresh(s.provider);radios.setOnCheckedChangeListener{_,id->refresh(if(id==2)SettingsStore.PROVIDER_GEMINI else SettingsStore.PROVIDER_OPENROUTER)}
+  refresh(s.provider);radios.setOnCheckedChangeListener{_,id->refresh(if(id==geminiId)SettingsStore.PROVIDER_GEMINI else SettingsStore.PROVIDER_OPENROUTER)}
   r.addView(Button(this).apply{text="Save settings";setTextColor(UiTheme.textPrimary);background=UiTheme.gradient(20f);setOnClickListener{save();Toast.makeText(this@SettingsActivity,"AI settings saved",Toast.LENGTH_SHORT).show()}})
   r.addView(Button(this).apply{text="Test connection";setOnClickListener{test()}})
   r.addView(TextView(this).apply{text="Free models only. Keys are stored in app-private SharedPreferences for this prototype. Android Keystore is future work.";setTextColor(UiTheme.textMuted);setPadding(0,dp(12),0,0)})

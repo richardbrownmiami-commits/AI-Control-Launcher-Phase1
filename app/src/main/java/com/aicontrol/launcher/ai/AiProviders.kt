@@ -1,6 +1,5 @@
 package com.aicontrol.launcher.ai
 
-import android.util.Log
 import com.aicontrol.launcher.data.SettingsStore
 import java.net.HttpURLConnection
 import java.net.URL
@@ -12,8 +11,6 @@ import org.json.JSONObject
 fun createProvider(settings: SettingsStore): AiProvider =
     if (settings.provider == SettingsStore.PROVIDER_GEMINI) GeminiProvider(settings.model, settings.geminiKey)
     else OpenRouterProvider(settings.model, settings.openRouterKey)
-
-private const val TAG = "AIControlProvider"
 
 private fun cleanJson(text: String): String {
     val fence = "```"
@@ -60,7 +57,6 @@ class OpenRouterProvider(private val model: String, private val apiKey: String) 
             runCatching {
                 require(apiKey.isNotBlank()) { "OpenRouter API key is empty" }
                 require(model.isNotBlank()) { "OpenRouter model is empty" }
-                Log.d(TAG, "OpenRouter model=$model user="+userMessage.take(80))
                 val prompt = buildString {
                     append("Launcher state:\n"); append(launcherState)
                     append("\nConversation history:\n"); append(historyText(history))
@@ -82,10 +78,8 @@ class OpenRouterProvider(private val model: String, private val apiKey: String) 
                 try {
                     conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
                     val response=readResponse(conn)
-                    Log.d(TAG, "OpenRouter model=$model raw="+response.take(200))
                     if(conn.responseCode !in 200..299) error("OpenRouter HTTP "+conn.responseCode+": "+errorBody(response))
                     val content=JSONObject(response).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
-                    Log.d(TAG, "OpenRouter parsed raw="+content.take(200))
                     parseReply(content)
                 } finally { conn.disconnect() }
             }
@@ -98,7 +92,6 @@ class GeminiProvider(private val model: String, private val apiKey: String) : Ai
             runCatching {
                 require(apiKey.isNotBlank()) { "Gemini API key is empty" }
                 require(model.isNotBlank()) { "Gemini model is empty" }
-                Log.d(TAG, "Gemini model=$model user="+userMessage.take(80))
                 val contents=JSONArray()
                 history.takeLast(8).forEach {
                     contents.put(JSONObject().put("role",if(it.role=="assistant")"model" else "user")
@@ -109,18 +102,17 @@ class GeminiProvider(private val model: String, private val apiKey: String) : Ai
                 val body=JSONObject()
                     .put("system_instruction",JSONObject().put("parts",JSONArray().put(JSONObject().put("text",AiPlanner.SYSTEM_PROMPT))))
                     .put("contents",contents).put("generationConfig",JSONObject().put("temperature",0.4)).toString()
-                val endpoint="https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent?key="+apiKey
+                val endpoint="https://generativelanguage.googleapis.com/v1beta/models/"+model+":generateContent"
                 val conn=(URL(endpoint).openConnection() as HttpURLConnection).apply{
                     requestMethod="POST";connectTimeout=15000;readTimeout=30000;doOutput=true
                     setRequestProperty("Content-Type","application/json")
+                    setRequestProperty("x-goog-api-key",apiKey)
                 }
                 try{
                     conn.outputStream.use{it.write(body.toByteArray(Charsets.UTF_8))}
                     val response=readResponse(conn)
-                    Log.d(TAG,"Gemini model=$model raw="+response.take(200))
                     if(conn.responseCode !in 200..299) error("Gemini HTTP "+conn.responseCode+": "+errorBody(response))
                     val content=JSONObject(response).getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
-                    Log.d(TAG,"Gemini parsed raw="+content.take(200))
                     parseReply(content)
                 }finally{conn.disconnect()}
             }
