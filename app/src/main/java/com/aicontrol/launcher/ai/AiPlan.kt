@@ -1,6 +1,7 @@
 package com.aicontrol.launcher.ai
 
 import com.aicontrol.launcher.theme.ThemeSpec
+import com.aicontrol.launcher.assets.AssetSearchPolicy
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -60,19 +61,23 @@ object AiPlanValidator {
             return AiPlanDecision.Clarification(message, clarification)
         }
 
-        val theme = themeObject?.let { parseTheme(it, availableThemes) }
+        val theme = themeObject?.let { parseTheme(it, availableThemes, availableIconPacks) }
         val actions = parseActions(actionArray, availableIconPacks)
         if (theme == null && actions.isEmpty()) return AiPlanDecision.Conversation(message)
         return AiPlanDecision.Review(AiLauncherPlan(message, theme, actions))
     }
 
-    private fun parseTheme(value: JSONObject, availableThemes: Set<String>): AiThemeOperation {
+    private fun parseTheme(
+        value: JSONObject,
+        availableThemes: Set<String>,
+        availableIconPacks: Map<String, String>
+    ): AiThemeOperation {
         val operation = requiredString(value, "operation", 20).uppercase()
         return when (operation) {
             "CREATE" -> {
                 requireOnlyKeys(
                     value,
-                    setOf("operation", "name", "background", "accent", "accent2", "card", "style", "typography", "iconStyle", "backgroundStyle"),
+                    setOf("operation", "name", "background", "accent", "accent2", "card", "style", "typography", "iconStyle", "backgroundStyle", "layout", "iconPack"),
                     setOf("operation", "name"),
                     "theme"
                 )
@@ -88,7 +93,15 @@ object AiPlanValidator {
                         style = optionalString(value, "style", 20) ?: suggested.style,
                         typography = optionalString(value, "typography", 20) ?: suggested.typography,
                         iconStyle = optionalString(value, "iconStyle", 20) ?: suggested.iconStyle,
-                        backgroundStyle = optionalString(value, "backgroundStyle", 20) ?: suggested.backgroundStyle
+                        backgroundStyle = optionalString(value, "backgroundStyle", 20) ?: suggested.backgroundStyle,
+                        layout = optionalString(value, "layout", 20) ?: suggested.layout,
+                        iconPackPackage = optionalString(value, "iconPack", 120)?.let { requestedPack ->
+                            availableIconPacks.entries.firstOrNull {
+                                it.key.equals(requestedPack, ignoreCase = true) || it.value.equals(requestedPack, ignoreCase = true)
+                            }?.value ?: throw IllegalArgumentException(
+                                "The requested icon pack is not installed or compatible. Install it from Google Play, then try again."
+                            )
+                        }
                     )
                 )
             }
@@ -120,6 +133,7 @@ object AiPlanValidator {
                     require(query.length in 3..120 && query.none { it.isISOControl() }) {
                         "Asset search phrases must contain 3–120 printable characters."
                     }
+                    AssetSearchPolicy.validate(query)
                     AiLauncherAction.SearchAssets(query)
                 }
                 "ADD_WIDGET" -> {

@@ -9,8 +9,11 @@ class CommonsSearchQueryTest {
     fun keepsExactWallpaperQueryFirstAndThenUsesRelevantAdjacentPairs() {
         val original = "abstract ocean blue gradient wallpaper"
         val variants = commonsSearchQueryVariants(original)
-        assertEquals(listOf(original, "abstract ocean", "ocean blue"), variants)
-        assertTrue(variants.size <= 3)
+        assertEquals(original, variants.first())
+        assertTrue(variants.contains("abstract ocean"))
+        assertTrue(variants.contains("ocean blue"))
+        assertEquals("abstract wallpaper", variants.last())
+        assertTrue(variants.size <= 5)
     }
 
     @Test

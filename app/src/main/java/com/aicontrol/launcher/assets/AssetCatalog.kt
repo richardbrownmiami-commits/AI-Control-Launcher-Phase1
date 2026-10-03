@@ -19,10 +19,21 @@ class AssetCatalog(context: Context) {
         return deleted
     }
     fun wallpaperAttribution(name: String): AssetAttribution? = attributions.forAsset("wallpaper", name)
-    fun deleteImage(name: String): Boolean = store.image(name).delete()
+    fun deleteImage(name: String): Boolean {
+        val deleted = store.image(name).delete()
+        if (deleted) attributions.remove("image", name)
+        return deleted
+    }
     fun deleteIconOverride(packageName: String): Boolean = store.icon(packageName.removeSuffix(".png")).delete()
     fun deleteIconPack(name: String): Boolean = deleteRecursively(File(store.iconPacks, name))
-    fun deleteTheme(name: String): Boolean = store.themeFile(name.removeSuffix(".json")).delete()
+    fun deleteTheme(name: String): Boolean {
+        val themeName = name.removeSuffix(".json")
+        val deleted = store.themeFile(themeName).delete()
+        val themeAssetsDeleted = File(store.themes, "${themeName.replace(Regex("[^A-Za-z0-9._-]"), "_")}.assets").deleteRecursively()
+        return deleted || themeAssetsDeleted
+    }
+    fun imageAttribution(name: String): AssetAttribution? = attributions.forAsset("image", name)
+    fun anyAttribution(name: String): AssetAttribution? = attributions.forAnyAsset(name)
     private fun files(dir: File): List<File> = dir.listFiles()?.filter { it.isFile }?.sortedBy { it.name } ?: emptyList()
     private fun deleteRecursively(file: File): Boolean {
         if (file.isDirectory) file.listFiles()?.forEach { deleteRecursively(it) }

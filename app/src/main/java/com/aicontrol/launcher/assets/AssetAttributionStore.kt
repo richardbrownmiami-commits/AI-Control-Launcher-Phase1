@@ -37,6 +37,9 @@ class AssetAttributionStore(context: Context) {
         readAll().firstOrNull { it.type == type && it.name == name }
 
     @Synchronized
+    fun forAnyAsset(name: String): AssetAttribution? = readAll().firstOrNull { it.name == name }
+
+    @Synchronized
     fun remove(type: String, name: String) {
         val values = readAll().filterNot { it.type == type && it.name == name }
         val json = JSONArray()

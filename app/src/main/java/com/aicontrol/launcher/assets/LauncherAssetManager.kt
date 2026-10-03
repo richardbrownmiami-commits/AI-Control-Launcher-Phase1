@@ -21,7 +21,7 @@ class LauncherAssetManager(private val context: Context) {
         onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> }
     ): Result<File> = runCatching {
         require(AssetLicensePolicy.isReusable(candidate.license)) { "This wallpaper's license is not approved for reuse." }
-        require(candidate.imageUrl.startsWith("https://upload.wikimedia.org/wikipedia/commons/")) {
+        require(CommonsAssetPolicy.isImageUrl(candidate.imageUrl)) {
             "Wallpaper image must come from Wikimedia Commons."
         }
         val base = candidate.title.substringAfterLast('/').substringBeforeLast('.')
@@ -32,7 +32,7 @@ class LauncherAssetManager(private val context: Context) {
         val downloaded = downloader.download(
             candidate.imageUrl,
             file,
-            allowedHosts = setOf("upload.wikimedia.org"),
+            allowedHosts = CommonsAssetPolicy.imageHosts,
             shouldContinue = shouldContinue,
             onProgress = onProgress
         ).getOrThrow().file

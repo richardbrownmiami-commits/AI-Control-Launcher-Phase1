@@ -581,13 +581,13 @@ class MainActivity : Activity() {
         aiConfirmation.stage(plan)
         val details = mutableListOf<String>()
         when (val theme = plan.theme) {
-            is AiThemeOperation.Create -> details += "Create theme ‘${theme.values.name}’ (${theme.values.background}, accent ${theme.values.accent}, ${theme.values.style} style)."
+            is AiThemeOperation.Create -> details += "Build theme ‘${theme.values.name}’ (${theme.values.layout} layout, ${theme.values.style} cards, ${theme.values.iconStyle} icons)."
             is AiThemeOperation.Apply -> details += "Apply the ‘${theme.name}’ theme."
             null -> Unit
         }
         plan.actions.forEach { action ->
             details += when (action) {
-                is AiLauncherAction.SearchAssets -> "Search Wikimedia Commons for ‘${action.query}’. The search phrase will be sent only after confirmation; each download needs a separate confirmation."
+                is AiLauncherAction.SearchAssets -> "Search Wikimedia Commons for ‘${action.query}’. For a new theme this is saved as a draft; choose a licensed image and preview it before applying."
                 AiLauncherAction.AddWidget -> "Open Android’s widget picker so you can choose an installed widget."
                 is AiLauncherAction.SetLayout -> "Set launcher layout to ‘${action.value}’."
                 is AiLauncherAction.SetStyle -> "Set card style to ‘${action.value}’."
@@ -635,11 +635,6 @@ class MainActivity : Activity() {
     }
 
     private fun executeAiPlan(plan: com.aicontrol.launcher.ai.AiLauncherPlan) {
-        when (val theme = plan.theme) {
-            is AiThemeOperation.Create -> saveTheme(theme.values)
-            is AiThemeOperation.Apply -> engine.setTheme(theme.name)
-            null -> Unit
-        }
         var assetQuery: String? = null
         var chooseWidget = false
         var browseIconPacks = false
@@ -659,15 +654,25 @@ class MainActivity : Activity() {
                 AiLauncherAction.BrowseIconPacks -> browseIconPacks = true
             }
         }
+        val themeDraftName = (plan.theme as? AiThemeOperation.Create)?.values?.name
+        when (val theme = plan.theme) {
+            is AiThemeOperation.Create -> if (assetQuery != null) engine.saveThemeDraft(theme.values) else saveTheme(theme.values)
+            is AiThemeOperation.Apply -> engine.setTheme(theme.name)
+            null -> Unit
+        }
         commandInput.text.clear()
         render()
         when {
             assetQuery != null -> startActivity(Intent(this, AssetsActivity::class.java)
-                .putExtra(AssetsActivity.EXTRA_SUGGESTED_QUERY, assetQuery))
+                .putExtra(AssetsActivity.EXTRA_SUGGESTED_QUERY, assetQuery)
+                .putExtra(AssetsActivity.EXTRA_THEME_NAME, themeDraftName.orEmpty()))
             chooseWidget -> addAndroidWidget()
             browseIconPacks -> IconPackStore.open(this).getOrThrow()
         }
-        Toast.makeText(this, "Confirmed plan applied. You can change installed icon packs in Launcher settings.", Toast.LENGTH_SHORT).show()
+        val confirmation = if (assetQuery != null && themeDraftName != null) {
+            "Theme draft saved. Add a licensed wallpaper, preview it, and choose when to apply."
+        } else "Confirmed plan applied. You can change installed icon packs in Launcher settings."
+        Toast.makeText(this, confirmation, Toast.LENGTH_LONG).show()
     }
 
     private fun reviewPrompt(result: PromptInterpretation.Ready, installed: List<AppInfo>) {
@@ -678,15 +683,15 @@ class MainActivity : Activity() {
         )
         if (command is LauncherCommand.CreateTheme) {
             builder.setView(themePreview(command.values))
-            builder.setNeutralButton("Apply + find wallpaper") { _, _ ->
+            builder.setNeutralButton("Save draft + find wallpaper") { _, _ ->
                 try {
-                    saveTheme(command.values)
+                    engine.saveThemeDraft(command.values)
                     commandInput.text.clear()
                     render()
                     startActivity(Intent(this, AssetsActivity::class.java).putExtra(
                         AssetsActivity.EXTRA_SUGGESTED_QUERY,
                         com.aicontrol.launcher.theme.ThemeSpec.suggestedWallpaperQuery(command.values.name)
-                    ))
+                    ).putExtra(AssetsActivity.EXTRA_THEME_NAME, command.values.name))
                 } catch (error: Exception) {
                     Toast.makeText(this, error.message ?: "Unable to apply theme", Toast.LENGTH_LONG).show()
                 }
@@ -733,7 +738,7 @@ class MainActivity : Activity() {
                 setTextColor(Color.WHITE)
             })
             addView(TextView(this@MainActivity).apply {
-                text = "${values.typography} type · ${values.iconStyle} icons · ${values.backgroundStyle} background. Optional wallpaper art can be imported locally or searched under an open license."
+                text = "${values.layout} layout · ${values.typography} type · ${values.iconStyle} icons · ${values.backgroundStyle} background. ${values.iconAssets.size} custom app-icon mappings."
                 textSize = 11f
                 setTextColor(Color.LTGRAY)
                 setPadding(0, dp(3), 0, dp(12))
@@ -792,6 +797,10 @@ class MainActivity : Activity() {
                     .put("typography", values.typography)
                     .put("iconStyle", values.iconStyle)
                     .put("backgroundStyle", values.backgroundStyle)
+                    .put("layout", values.layout)
+                    .put("wallpaperAsset", values.wallpaperAsset ?: "")
+                    .put("iconPackPackage", values.iconPackPackage ?: "")
+                    .put("iconAssets", org.json.JSONObject().apply { values.iconAssets.forEach { (pkg, asset) -> put(pkg, asset) } })
             )).toString()
         ).getOrThrow()
     }
@@ -1056,8 +1065,11 @@ class MainActivity : Activity() {
         val pack = engine.installedIconPack().takeIf { it.isNotBlank() }?.let {
             iconPacks.iconDrawable(it, app.packageName, app.activityName)
         }
+        val themeIcon = engine.themeIconFile(engine.theme(), app.packageName)?.let {
+            android.graphics.drawable.Drawable.createFromPath(it.absolutePath)
+        }
         val icon = ImageView(this).apply {
-            setImageDrawable(assets.iconDrawable(app.packageName) ?: pack ?: app.icon)
+            setImageDrawable(themeIcon ?: assets.iconDrawable(app.packageName) ?: pack ?: app.icon)
             contentDescription = app.label
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(dp(4), dp(4), dp(4), dp(4))
@@ -1158,8 +1170,11 @@ class MainActivity : Activity() {
             val pack = engine.installedIconPack().takeIf { it.isNotBlank() }?.let {
                 iconPacks.iconDrawable(it, app.packageName, app.activityName)
             }
+            val themeIcon = engine.themeIconFile(engine.theme(), app.packageName)?.let {
+                android.graphics.drawable.Drawable.createFromPath(it.absolutePath)
+            }
             dock.addView(ImageButton(this).apply {
-                setImageDrawable(assets.iconDrawable(app.packageName) ?: pack ?: app.icon)
+                setImageDrawable(themeIcon ?: assets.iconDrawable(app.packageName) ?: pack ?: app.icon)
                 contentDescription = item.optString("label", app.label)
                 background = UiTheme.rounded(Color.TRANSPARENT, 16f)
                 setPadding(dp(6), dp(6), dp(6), dp(6))

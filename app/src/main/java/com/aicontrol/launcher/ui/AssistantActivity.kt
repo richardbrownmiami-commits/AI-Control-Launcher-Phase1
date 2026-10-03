@@ -418,7 +418,7 @@ class AssistantActivity : Activity() {
     }
 
     private fun planCard(plan: com.aicontrol.launcher.ai.AiLauncherPlan): View {
-        val card = actionCard("Review before changing anything", "The assistant can set up a theme or open licensed wallpaper search. No action runs until you confirm.")
+        val card = actionCard("Review your theme bundle", "No search, download, or launcher change runs until you confirm. New themes stay drafts while you review licensed assets.")
         when (val theme = plan.theme) {
             is AiThemeOperation.Create -> card.addView(themePreview(theme.values))
             is AiThemeOperation.Apply -> card.addView(themePreview(engine.themeValues(theme.name)))
@@ -431,13 +431,16 @@ class AssistantActivity : Activity() {
                 null -> Unit
             }
             plan.actions.forEach { action -> add(when (action) {
-                is AiLauncherAction.SearchAssets -> "Search Wikimedia Commons for ‘${action.query}’ (licensed results only)"
+                is AiLauncherAction.SearchAssets -> "Build theme assets: search Commons for ‘${action.query}’, then match open-license app icons locally"
                 AiLauncherAction.AddWidget -> "Open Android’s widget picker"
                 is AiLauncherAction.SetLayout -> "Set layout to ${action.value}"
                 is AiLauncherAction.SetStyle -> "Set card style to ${action.value}"
                 is AiLauncherAction.ApplyInstalledIconPack -> "Apply installed icon pack ${action.label} (only mapped apps change)"
                 AiLauncherAction.BrowseIconPacks -> "Open the official Google Play icon-pack search; installation remains under your control"
             }) }
+            if (plan.theme is AiThemeOperation.Create && plan.actions.any { it is AiLauncherAction.SearchAssets }) {
+                add("After this plan confirmation, one reuse-filtered wallpaper and suitable CC BY-SA OpenMoji app icons are selected automatically. You review the complete bundle once before Apply; there are no per-image approval prompts.")
+            }
         }
         card.addView(TextView(this).apply {
             text = summary.joinToString("\n") { "• $it" }
@@ -445,6 +448,41 @@ class AssistantActivity : Activity() {
             setTextColor(UiTheme.textPrimary)
             setPadding(0, dp(10), 0, dp(10))
         })
+        val draftValues = (plan.theme as? AiThemeOperation.Create)?.values
+        if (draftValues != null && plan.actions.none { it is AiLauncherAction.SearchAssets || it === AiLauncherAction.AddWidget || it === AiLauncherAction.BrowseIconPacks }) {
+            card.addView(Button(this).apply {
+                text = "Build full theme bundle"
+                textSize = 11f
+                setTextColor(Color.WHITE)
+                background = UiTheme.gradient(16f)
+                setOnClickListener {
+                    runCatching {
+                        engine.saveThemeDraft(draftValues)
+                        pendingPlan = null
+                        startActivity(Intent(this@AssistantActivity, AssetsActivity::class.java)
+                            .putExtra(AssetsActivity.EXTRA_THEME_NAME, draftValues.name)
+                            .putExtra(AssetsActivity.EXTRA_SUGGESTED_QUERY, ThemeSpec.suggestedWallpaperQuery(draftValues.name)))
+                    }.onFailure { appendStatus("Could not start the bundle builder: ${it.message ?: "The draft was not saved."}") }
+                }
+            }, LinearLayout.LayoutParams(-1, dp(40)).apply { bottomMargin = dp(6) })
+        }
+        if (draftValues != null && plan.actions.isEmpty()) {
+            val values = draftValues
+            card.addView(Button(this).apply {
+                text = "Save as draft · don’t apply yet"
+                textSize = 11f
+                setTextColor(UiTheme.textPrimary)
+                background = UiTheme.rounded(UiTheme.card, 16f, UiTheme.accent, 1)
+                setOnClickListener {
+                    runCatching { engine.saveThemeDraft(values) }
+                        .onSuccess {
+                            pendingPlan = null
+                            append(Entry("assistant", "Saved ‘${values.name}’ as a draft. Add a wallpaper or app icons later from the theme gallery."))
+                        }
+                        .onFailure { appendStatus("Could not save the theme draft: ${it.message ?: "Storage was unavailable."}") }
+                }
+            }, LinearLayout.LayoutParams(-1, dp(40)).apply { bottomMargin = dp(6) })
+        }
         val buttons = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         buttons.addView(Button(this).apply {
             text = "Cancel"
@@ -455,6 +493,7 @@ class AssistantActivity : Activity() {
         }, LinearLayout.LayoutParams(0, dp(42), 1f))
         buttons.addView(Button(this).apply {
             text = when {
+                plan.actions.any { it is AiLauncherAction.SearchAssets } && plan.theme is AiThemeOperation.Create -> "Confirm & build theme"
                 plan.actions.any { it is AiLauncherAction.SearchAssets } -> "Confirm & find wallpaper"
                 plan.actions.any { it === AiLauncherAction.BrowseIconPacks } -> "Confirm & browse packs"
                 else -> "Confirm & apply"
@@ -474,6 +513,31 @@ class AssistantActivity : Activity() {
             is LauncherCommand.CreateTheme -> card.addView(themePreview(command.values))
             is LauncherCommand.ApplyTheme -> card.addView(themePreview(engine.themeValues(command.name)))
             else -> Unit
+        }
+        (result.command as? LauncherCommand.CreateTheme)?.let { command ->
+            card.addView(TextView(this).apply {
+                text = "Optional complete build: find one reuse-cleared abstract wallpaper and matching OpenMoji icons, preview the bundle, then decide whether to apply it. Local Downloads are optional."
+                textSize = 11f
+                setTextColor(UiTheme.textMuted)
+                setPadding(0, dp(7), 0, dp(7))
+            })
+            card.addView(Button(this).apply {
+                text = "Build full theme bundle"
+                textSize = 11f
+                setTextColor(Color.WHITE)
+                background = UiTheme.gradient(16f)
+                setOnClickListener {
+                    runCatching {
+                        engine.saveThemeDraft(command.values)
+                        pendingOffline = null
+                        startActivity(android.content.Intent(this@AssistantActivity, AssetsActivity::class.java)
+                            .putExtra(AssetsActivity.EXTRA_THEME_NAME, command.values.name)
+                            .putExtra(AssetsActivity.EXTRA_SUGGESTED_QUERY, ThemeSpec.suggestedWallpaperQuery(command.values.name)))
+                    }.onFailure {
+                        appendStatus("Could not start the bundle builder: ${it.message ?: "The draft was not saved."}")
+                    }
+                }
+            }, LinearLayout.LayoutParams(-1, dp(42)).apply { bottomMargin = dp(8) })
         }
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         row.addView(Button(this).apply {
@@ -546,11 +610,6 @@ class AssistantActivity : Activity() {
 
     private fun executePlan(plan: com.aicontrol.launcher.ai.AiLauncherPlan) {
         try {
-            when (val theme = plan.theme) {
-                is AiThemeOperation.Create -> saveTheme(theme.values)
-                is AiThemeOperation.Apply -> engine.setTheme(theme.name)
-                null -> Unit
-            }
             var query: String? = null
             var addWidget = false
             var browseIconPacks = false
@@ -572,17 +631,26 @@ class AssistantActivity : Activity() {
                     AiLauncherAction.BrowseIconPacks -> browseIconPacks = true
                 }
             }
+            val draftName = (plan.theme as? AiThemeOperation.Create)?.values?.name
+            when (val theme = plan.theme) {
+                is AiThemeOperation.Create -> if (query != null) engine.saveThemeDraft(theme.values) else saveTheme(theme.values)
+                is AiThemeOperation.Apply -> engine.setTheme(theme.name)
+                null -> Unit
+            }
             UiTheme.bind(engine)
             persistThread()
             renderTranscript()
             when {
-                query != null -> startActivity(Intent(this, AssetsActivity::class.java).putExtra(AssetsActivity.EXTRA_SUGGESTED_QUERY, query))
+                query != null -> startActivity(Intent(this, AssetsActivity::class.java)
+                    .putExtra(AssetsActivity.EXTRA_SUGGESTED_QUERY, query)
+                    .putExtra(AssetsActivity.EXTRA_THEME_NAME, draftName.orEmpty()))
                 addWidget -> startActivity(Intent(this, MainActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                     .putExtra(MainActivity.EXTRA_REQUEST_ADD_WIDGET, true))
                 browseIconPacks -> IconPackStore.open(this).getOrThrow()
             }
             setStatus(when {
+                query != null && draftName != null -> "Theme draft saved. Review the Commons license, choose an image, then preview and apply the complete bundle."
                 query != null -> "Confirmed. Wallpaper search is open; review a result and its license before downloading."
                 addWidget -> "Confirmed. Choose an installed widget in Android's picker."
                 browseIconPacks -> "Confirmed. Google Play search is open; install a pack there, then select it in Launcher settings."
@@ -622,6 +690,9 @@ class AssistantActivity : Activity() {
             .put("bg", values.background).put("accent", values.accent).put("accent2", values.accent2)
             .put("card", values.card).put("style", values.style).put("typography", values.typography)
             .put("iconStyle", values.iconStyle).put("backgroundStyle", values.backgroundStyle)
+            .put("layout", values.layout).put("wallpaperAsset", values.wallpaperAsset ?: "")
+            .put("iconPackPackage", values.iconPackPackage ?: "")
+            .put("iconAssets", JSONObject().apply { values.iconAssets.forEach { (pkg, asset) -> put(pkg, asset) } })
         engine.applyJson(JSONObject().put("actions", JSONArray().put(action)).toString()).getOrThrow()
     }
 

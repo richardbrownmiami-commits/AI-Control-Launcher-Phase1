@@ -29,6 +29,23 @@ class AiPlanValidatorTest {
     }
 
     @Test
+    fun allowsAbstractSpiderInspiredWallpaperSearch() {
+        val decision = AiPlanValidator.parse(
+            """{"message":"A red and blue geometric web theme","theme":{"operation":"CREATE","name":"Spider-inspired"},"actions":[{"type":"SEARCH_ASSETS","query":"abstract red blue geometric web pattern wallpaper"}]}""",
+            themes
+        ) as AiPlanDecision.Review
+        assertTrue(decision.plan.actions.single() is AiLauncherAction.SearchAssets)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsSearchQueriesThatNameCharacterArt() {
+        AiPlanValidator.parse(
+            """{"message":"Looking for a character image","theme":null,"actions":[{"type":"SEARCH_ASSETS","query":"Spider-Man wallpaper"}]}""",
+            themes
+        )
+    }
+
+    @Test
     fun acceptsMarkdownAndProseWrappersAroundAValidJsonObject() {
         val decision = AiPlanValidator.parse(
             "Here is the reviewed plan:\n```json\n{\"message\":\"A calm theme is ready\",\"theme\":{\"operation\":\"CREATE\",\"name\":\"Calm blue\"},\"actions\":[]}\n```\n",
@@ -100,13 +117,24 @@ class AiPlanValidatorTest {
     @Test
     fun validatesPresetDisplayAttributesForAiCreatedThemes() {
         val decision = AiPlanValidator.parse(
-            """{"message":"A calm preset","theme":{"operation":"CREATE","name":"Sage AI","typography":"serif","iconStyle":"squircle","backgroundStyle":"aurora"},"actions":[]}""",
-            themes
+            """{"message":"A calm preset","theme":{"operation":"CREATE","name":"Sage AI","typography":"serif","iconStyle":"squircle","backgroundStyle":"aurora","layout":"wide","iconPack":"Mono Minimal"},"actions":[]}""",
+            themes,
+            mapOf("Mono Minimal" to "org.example.monominimal")
         ) as AiPlanDecision.Review
         val values = (decision.plan.theme as AiThemeOperation.Create).values
         assertEquals("serif", values.typography)
         assertEquals("squircle", values.iconStyle)
         assertEquals("aurora", values.backgroundStyle)
+        assertEquals("wide", values.layout)
+        assertEquals("org.example.monominimal", values.iconPackPackage)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsThemeIconPackUnlessItIsInstalledAndCompatible() {
+        AiPlanValidator.parse(
+            """{"message":"A theme","theme":{"operation":"CREATE","name":"Untrusted","iconPack":"Not installed"},"actions":[]}""",
+            themes
+        )
     }
 
     @Test(expected = IllegalArgumentException::class)

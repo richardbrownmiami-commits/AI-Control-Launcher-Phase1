@@ -8,10 +8,14 @@ import android.os.Bundle
 import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ImageView
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.aicontrol.launcher.actions.ActionEngine
+import com.aicontrol.launcher.assets.AssetAttributionStore
+import com.aicontrol.launcher.assets.AssetStore
+import com.aicontrol.launcher.assets.ImageAssetValidation
 import com.aicontrol.launcher.theme.ThemeSpec
 
 @SuppressLint("SetTextI18n")
@@ -57,7 +61,7 @@ class ThemeGalleryActivity : Activity() {
         }, LinearLayout.LayoutParams(dp(62), dp(40)))
         screenRoot.addView(heading)
         screenRoot.addView(TextView(this).apply {
-            text = "Ready-made presets and your saved themes. Preview the full home-screen style before applying; wallpaper and Android icon packs are managed separately."
+            text = "Ready-made palettes and saved theme bundles. Preview layout, wallpaper, app icons, attribution and colors before applying."
             textSize = 12f
             typeface = UiTheme.font()
             setTextColor(UiTheme.textMuted)
@@ -138,7 +142,9 @@ class ThemeGalleryActivity : Activity() {
             }
             card.addView(swatches)
             card.addView(TextView(this).apply {
-                text = "${values.typography} type · ${values.iconStyle} icons · ${values.backgroundStyle} background"
+                text = "${values.layout} layout · ${values.typography} type · ${values.iconStyle} icons · ${values.backgroundStyle} background · ${values.iconAssets.size} app mappings" +
+                    (if (values.wallpaperAsset != null) " · wallpaper" else "") +
+                    (values.iconPackPackage?.let { " · icon pack" } ?: "")
                 textSize = 11f
                 typeface = fontFor(values.typography)
                 setTextColor(contrast(values.background))
@@ -165,6 +171,16 @@ class ThemeGalleryActivity : Activity() {
                 setOnClickListener { previewTheme(values) }
             }
             card.addView(previewButton, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(8) })
+            if (engine.isCustomTheme(name)) card.addView(Button(this).apply {
+                text = "Edit bundle assets · wallpaper · app icons"
+                textSize = 10f
+                setTextColor(UiTheme.textPrimary)
+                background = UiTheme.rounded(UiTheme.card, 14f, UiTheme.accent, 1)
+                setOnClickListener {
+                    startActivity(android.content.Intent(this@ThemeGalleryActivity, AssetsActivity::class.java)
+                        .putExtra(AssetsActivity.EXTRA_THEME_NAME, name))
+                }
+            }, LinearLayout.LayoutParams(-1, dp(38)).apply { topMargin = dp(5) })
             list.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(9) })
         }
     }
@@ -183,8 +199,16 @@ class ThemeGalleryActivity : Activity() {
             typeface = fontFor(values.typography)
             setTextColor(primary)
         })
+        val wallpaper = values.wallpaperAsset?.let { AssetStore(this).wallpaper(it) }
+        val wallpaperBitmap = wallpaper?.takeIf { it.isFile }?.let { ImageAssetValidation.decodeSampled(it, 1000) }
+        if (wallpaperBitmap != null) preview.addView(ImageView(this).apply {
+            setImageBitmap(wallpaperBitmap)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            contentDescription = "${values.name} wallpaper preview"
+        }, LinearLayout.LayoutParams(-1, dp(150)).apply { topMargin = dp(9) })
         preview.addView(TextView(this).apply {
-            text = "${values.typography} typography · ${values.iconStyle} icons · ${values.backgroundStyle} background"
+            text = "${values.layout} layout · ${values.typography} typography · ${values.iconStyle} icons · ${values.backgroundStyle} background · ${values.iconAssets.size} mapped apps" +
+                (values.iconPackPackage?.let { " · installed pack: $it" } ?: "")
             textSize = 11f
             typeface = fontFor(values.typography)
             setTextColor(primary)
@@ -203,9 +227,26 @@ class ThemeGalleryActivity : Activity() {
             }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { leftMargin = dp(3); rightMargin = dp(3) })
         }
         preview.addView(row)
+        val attributionStore = AssetAttributionStore(this)
+        val attribution = buildList {
+            values.wallpaperAsset?.let { attributionStore.forAsset("wallpaper", it)?.let(::add) }
+            values.iconAssets.values.distinct().forEach { asset ->
+                attributionStore.forAnyAsset(asset)?.let { record -> if (record !in this) add(record) }
+            }
+        }
+        preview.addView(TextView(this).apply {
+            text = if (attribution.isEmpty()) {
+                "No remote attribution recorded. Unmapped apps keep their installed icons."
+            } else attribution.joinToString("\n") { "${it.title} · ${it.creator} · ${it.license}\n${it.sourceUrl}" } +
+                (if (attribution.any { it.title.contains("OpenMoji", true) }) "\nOpenMoji attribution: All emojis designed by OpenMoji – the open-source emoji and icon project. License: CC BY-SA 4.0." else "")
+            textSize = 9f
+            setTextColor(UiTheme.textMuted)
+            setPadding(dp(4), dp(8), dp(4), dp(2))
+        })
+        val previewScroll = ScrollView(this).apply { addView(preview) }
         AlertDialog.Builder(this)
             .setTitle("Review theme · ${values.name}")
-            .setView(preview)
+            .setView(previewScroll)
             .setMessage("The current theme stays active unless you choose Apply. You can restore the previous theme from this gallery.")
             .setNegativeButton("Keep current", null)
             .setPositiveButton("Apply theme") { _, _ ->

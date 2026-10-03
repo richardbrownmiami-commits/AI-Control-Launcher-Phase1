@@ -21,6 +21,7 @@ class ActionEngine(context: Context) {
     private val prefs = appContext.getSharedPreferences("launcher_state", Context.MODE_PRIVATE)
     private val assets = LauncherAssetManager(appContext)
     private val store = AssetStore(appContext)
+    private val assetAttributions = com.aicontrol.launcher.assets.AssetAttributionStore(appContext)
     private val apps = AppRepository(appContext)
 
     fun applyJson(json: String): Result<Int> = runCatching {
@@ -62,7 +63,13 @@ class ActionEngine(context: Context) {
                         style = action.optString("style", ThemeSpec.DEFAULT_STYLE),
                         typography = action.optString("typography", ThemeSpec.DEFAULT_TYPOGRAPHY),
                         iconStyle = action.optString("iconStyle", ThemeSpec.DEFAULT_ICON_STYLE),
-                        backgroundStyle = action.optString("backgroundStyle", ThemeSpec.DEFAULT_BACKGROUND_STYLE)
+                        backgroundStyle = action.optString("backgroundStyle", ThemeSpec.DEFAULT_BACKGROUND_STYLE),
+                        layout = action.optString("layout", ThemeSpec.DEFAULT_LAYOUT),
+                        wallpaperAsset = action.optString("wallpaperAsset").takeIf { it.isNotBlank() },
+                        iconAssets = action.optJSONObject("iconAssets")?.let { objectValue ->
+                            buildMap { objectValue.keys().forEach { key -> put(key, objectValue.optString(key)) } }
+                        } ?: emptyMap(),
+                        iconPackPackage = action.optString("iconPackPackage").takeIf { it.isNotBlank() }
                     )
                     saveTheme(values)
                     applied++
@@ -162,7 +169,64 @@ class ActionEngine(context: Context) {
         val data = themeJson(values)
         recordThemeForRollback()
         store.themeFile(values.name).writeText(data.toString())
-        prefs.edit().putString("theme", values.name).putString("style", values.style).apply()
+        setTheme(values.name)
+    }
+
+    /** Saves a reviewed custom theme without changing the currently active launcher appearance. */
+    fun saveThemeDraft(values: ThemeSpec.Values) {
+        val checked = ThemeSpec.validate(
+            values.name, values.background, values.accent, values.accent2, values.card, values.style,
+            values.typography, values.iconStyle, values.backgroundStyle, values.layout,
+            values.wallpaperAsset, values.iconAssets, values.iconPackPackage
+        )
+        val conflictingCustomName = store.themes.listFiles()?.firstOrNull {
+            it.isFile && it.extension.equals("json", true) &&
+                it.nameWithoutExtension.equals(checked.name, ignoreCase = true) && it.nameWithoutExtension != checked.name
+        }
+        require(conflictingCustomName == null) { "A custom theme with the same name already exists; use the exact spelling to replace it." }
+        store.themeFile(checked.name).writeText(themeJson(checked).toString())
+    }
+
+    /** Attach a verified image from the private library to a saved custom theme. */
+    fun linkThemeWallpaper(themeName: String, file: java.io.File) {
+        val path = file.canonicalPath
+        require(store.themeFile(themeName).isFile) { "Save this custom theme before adding wallpaper." }
+        require(path.startsWith(store.wallpapers.canonicalPath + java.io.File.separator) && file.isFile) {
+            "Choose a wallpaper from this launcher's private asset library."
+        }
+        com.aicontrol.launcher.assets.ImageAssetValidation.validate(file)
+        val current = themeValues(themeName)
+        writeTheme(current.copy(wallpaperAsset = file.name))
+    }
+
+    /** Copy a user-selected/local-library image into a theme-scoped app-icon mapping. */
+    fun linkThemeIcon(themeName: String, packageName: String, source: java.io.File) {
+        require(store.themeFile(themeName).isFile) { "Save this custom theme before adding app icons." }
+        require(packageName.matches(Regex("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+"))) { "Choose an installed app." }
+        val path = source.canonicalPath
+        val fromPrivateWallpapers = path.startsWith(store.wallpapers.canonicalPath + java.io.File.separator)
+        val fromPrivateImages = path.startsWith(store.images.canonicalPath + java.io.File.separator)
+        require(source.isFile && (fromPrivateWallpapers || fromPrivateImages)) {
+            "Choose an image from this launcher's private asset library."
+        }
+        com.aicontrol.launcher.assets.ImageAssetValidation.validate(source)
+        val target = store.themeIcon(themeName, packageName)
+        source.copyTo(target, overwrite = true)
+        val current = themeValues(themeName)
+        writeTheme(current.copy(iconAssets = current.iconAssets + (packageName to source.name)))
+        assetAttributions.forAnyAsset(source.name)?.let { sourceAttribution ->
+            assetAttributions.record(sourceAttribution.copy(type = "theme_icon"))
+        }
+    }
+
+    fun themeIconFile(themeName: String, packageName: String): java.io.File? {
+        val values = themeValues(themeName)
+        if (packageName !in values.iconAssets) return null
+        return store.themeIcon(themeName, packageName).takeIf { it.isFile }
+    }
+
+    private fun writeTheme(values: ThemeSpec.Values) {
+        store.themeFile(values.name).writeText(themeJson(values).toString())
     }
 
     private fun addHidden(packageName: String) {
@@ -239,12 +303,22 @@ class ActionEngine(context: Context) {
         return ordered.values.toSet()
     }
 
+    fun isCustomTheme(name: String): Boolean = store.themeFile(name).isFile
+
     fun setTheme(value: String) {
         val requested = value.trim()
         require(availableThemes().any { it.equals(requested, ignoreCase = true) }) { "Unknown theme '$requested'" }
         val stored = availableThemes().first { it.equals(requested, ignoreCase = true) }
         if (!theme().equals(stored, ignoreCase = true)) recordThemeForRollback()
-        prefs.edit().putString("theme", stored).putString("style", themeValues(stored).style).apply()
+        val values = themeValues(stored)
+        values.wallpaperAsset?.let { wallpaperName ->
+            val wallpaper = store.wallpaper(wallpaperName)
+            require(wallpaper.isFile) { "Theme wallpaper '$wallpaperName' is missing from the private asset library." }
+            assets.setLauncherWallpaper(wallpaper).getOrThrow()
+        }
+        prefs.edit().putString("theme", stored).putString("style", values.style).apply()
+        setLayout(values.layout)
+        values.iconPackPackage?.let { prefs.edit().putString("installed_icon_pack", it).apply() }
     }
 
     fun setStyle(value: String) {
@@ -295,13 +369,25 @@ class ActionEngine(context: Context) {
                 style = snapshot.getString("style"),
                 typography = snapshot.getString("typography"),
                 iconStyle = snapshot.getString("iconStyle"),
-                backgroundStyle = snapshot.getString("backgroundStyle")
+                backgroundStyle = snapshot.getString("backgroundStyle"),
+                layout = snapshot.optString("layout", ThemeSpec.DEFAULT_LAYOUT),
+                wallpaperAsset = snapshot.optString("wallpaperAsset").takeIf { it.isNotBlank() },
+                iconAssets = snapshot.optJSONObject("iconAssets")?.let { objectValue ->
+                    buildMap { objectValue.keys().forEach { key -> put(key, objectValue.optString(key)) } }
+                } ?: emptyMap(),
+                iconPackPackage = snapshot.optString("iconPackPackage").takeIf { it.isNotBlank() }
             )
             val customFile = store.themeFile(name)
             if (snapshot.optBoolean("custom", false)) customFile.writeText(themeJson(values).toString())
             else if (customFile.isFile) customFile.delete()
-            prefs.edit().remove("theme_rollback_snapshot").putString("theme", name)
-                .putString("style", snapshot.optString("activeStyle", values.style)).apply()
+            val editor = prefs.edit().remove("theme_rollback_snapshot").putString("theme", name)
+                .putString("style", snapshot.optString("activeStyle", values.style))
+                .putString("layout", snapshot.optString("activeLayout", values.layout))
+            if (snapshot.has("activeWallpaper")) editor.putString("active_wallpaper", snapshot.optString("activeWallpaper"))
+            else editor.remove("active_wallpaper")
+            if (snapshot.has("activeIconPack")) editor.putString("installed_icon_pack", snapshot.optString("activeIconPack"))
+            else editor.remove("installed_icon_pack")
+            editor.apply()
             true
         }.getOrDefault(false)
     }
@@ -312,6 +398,9 @@ class ActionEngine(context: Context) {
         val snapshot = themeJson(values)
             .put("custom", store.themeFile(current).isFile)
             .put("activeStyle", style())
+            .put("activeLayout", layout())
+            .put("activeWallpaper", prefs.getString("active_wallpaper", "") ?: "")
+            .put("activeIconPack", installedIconPack())
         prefs.edit().putString("theme_rollback_snapshot", snapshot.toString()).apply()
     }
 
@@ -325,6 +414,10 @@ class ActionEngine(context: Context) {
         .put("typography", values.typography)
         .put("iconStyle", values.iconStyle)
         .put("backgroundStyle", values.backgroundStyle)
+        .put("layout", values.layout)
+        .put("wallpaperAsset", values.wallpaperAsset ?: "")
+        .put("iconPackPackage", values.iconPackPackage ?: "")
+        .put("iconAssets", JSONObject().apply { values.iconAssets.forEach { (pkg, asset) -> put(pkg, asset) } })
 
     fun themeValues(name: String = theme()): ThemeSpec.Values {
         val customFile = store.themeFile(name)
@@ -339,7 +432,13 @@ class ActionEngine(context: Context) {
                 style = json.optString("style", ThemeSpec.DEFAULT_STYLE),
                 typography = json.optString("typography", ThemeSpec.DEFAULT_TYPOGRAPHY),
                 iconStyle = json.optString("iconStyle", ThemeSpec.DEFAULT_ICON_STYLE),
-                backgroundStyle = json.optString("backgroundStyle", ThemeSpec.DEFAULT_BACKGROUND_STYLE)
+                backgroundStyle = json.optString("backgroundStyle", ThemeSpec.DEFAULT_BACKGROUND_STYLE),
+                layout = json.optString("layout", ThemeSpec.DEFAULT_LAYOUT),
+                wallpaperAsset = json.optString("wallpaperAsset").takeIf { it.isNotBlank() },
+                iconAssets = json.optJSONObject("iconAssets")?.let { objectValue ->
+                    buildMap { objectValue.keys().forEach { key -> put(key, objectValue.optString(key)) } }
+                } ?: emptyMap(),
+                iconPackPackage = json.optString("iconPackPackage").takeIf { it.isNotBlank() }
             )
         }.getOrElse { ThemeSpec.builtIn(name) ?: ThemeSpec.validate(name) }
         return ThemeSpec.builtIn(name) ?: ThemeSpec.validate(name)

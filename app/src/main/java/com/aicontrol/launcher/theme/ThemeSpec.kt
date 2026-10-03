@@ -10,11 +10,13 @@ object ThemeSpec {
     const val DEFAULT_TYPOGRAPHY = "system"
     const val DEFAULT_ICON_STYLE = "rounded"
     const val DEFAULT_BACKGROUND_STYLE = "gradient"
+    const val DEFAULT_LAYOUT = "grid"
 
     val styles = setOf("glass", "flat", "neon")
     val typographies = setOf("system", "compact", "serif")
     val iconStyles = setOf("rounded", "circle", "squircle")
     val backgroundStyles = setOf("gradient", "solid", "aurora", "warm")
+    val layouts = setOf("grid", "compact", "dense", "wide")
 
     val namedColors = linkedMapOf(
         "black" to "#000000", "white" to "#FFFFFF", "gray" to "#808080", "grey" to "#808080",
@@ -27,6 +29,7 @@ object ThemeSpec {
 
     val builtInNames = listOf("default", "midnight", "ocean", "ember", "aurora", "sunset", "sage", "paper", "graphite")
 
+    /** A user-owned bundle. Asset references are safe filenames inside this app's private library. */
     data class Values(
         val name: String,
         val background: String,
@@ -36,7 +39,11 @@ object ThemeSpec {
         val style: String,
         val typography: String = DEFAULT_TYPOGRAPHY,
         val iconStyle: String = DEFAULT_ICON_STYLE,
-        val backgroundStyle: String = DEFAULT_BACKGROUND_STYLE
+        val backgroundStyle: String = DEFAULT_BACKGROUND_STYLE,
+        val layout: String = DEFAULT_LAYOUT,
+        val wallpaperAsset: String? = null,
+        val iconAssets: Map<String, String> = emptyMap(),
+        val iconPackPackage: String? = null
     )
 
     fun normalizeColor(value: String): String {
@@ -55,7 +62,11 @@ object ThemeSpec {
         style: String = DEFAULT_STYLE,
         typography: String = DEFAULT_TYPOGRAPHY,
         iconStyle: String = DEFAULT_ICON_STYLE,
-        backgroundStyle: String = DEFAULT_BACKGROUND_STYLE
+        backgroundStyle: String = DEFAULT_BACKGROUND_STYLE,
+        layout: String = DEFAULT_LAYOUT,
+        wallpaperAsset: String? = null,
+        iconAssets: Map<String, String> = emptyMap(),
+        iconPackPackage: String? = null
     ): Values {
         val normalizedName = name.trim()
         require(normalizedName.matches(Regex("[A-Za-z0-9][A-Za-z0-9 _.-]{0,39}"))) {
@@ -65,32 +76,55 @@ object ThemeSpec {
         val normalizedTypography = typography.trim().lowercase()
         val normalizedIconStyle = iconStyle.trim().lowercase()
         val normalizedBackgroundStyle = backgroundStyle.trim().lowercase()
+        val normalizedLayout = layout.trim().lowercase()
         require(normalizedStyle in styles) { "Unsupported card style '$style'." }
         require(normalizedTypography in typographies) { "Unsupported typography '$typography'." }
         require(normalizedIconStyle in iconStyles) { "Unsupported icon style '$iconStyle'." }
         require(normalizedBackgroundStyle in backgroundStyles) { "Unsupported background style '$backgroundStyle'." }
-        return Values(normalizedName, normalizeColor(background), normalizeColor(accent), normalizeColor(accent2),
-            normalizeColor(card), normalizedStyle, normalizedTypography, normalizedIconStyle, normalizedBackgroundStyle)
+        require(normalizedLayout in layouts) { "Unsupported home-screen layout '$layout'." }
+        val wallpaper = wallpaperAsset?.trim()?.takeIf { it.isNotEmpty() }?.also(::requireSafeAssetName)
+        require(iconAssets.size <= 100) { "A theme can include at most 100 app-icon mappings." }
+        val normalizedIcons = iconAssets.map { (packageName, assetName) ->
+            require(packageName.matches(Regex("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+"))) {
+                "Invalid app package in theme icon mappings."
+            }
+            requireSafeAssetName(assetName)
+            packageName to assetName.trim()
+        }.toMap()
+        val normalizedPack = iconPackPackage?.trim()?.takeIf { it.isNotEmpty() }?.also {
+            require(it.matches(Regex("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+"))) { "Invalid installed icon-pack package." }
+        }
+        return Values(
+            normalizedName, normalizeColor(background), normalizeColor(accent), normalizeColor(accent2),
+            normalizeColor(card), normalizedStyle, normalizedTypography, normalizedIconStyle,
+            normalizedBackgroundStyle, normalizedLayout, wallpaper, normalizedIcons, normalizedPack
+        )
+    }
+
+    private fun requireSafeAssetName(value: String) {
+        require(value.trim().matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{0,119}")) && ".." !in value) {
+            "Theme assets must use a safe library filename, not a path or URL."
+        }
     }
 
     fun builtIn(name: String): Values? = when (name.trim().lowercase()) {
         "default" -> validate("default")
-        "midnight" -> validate("midnight", "#05080E", "#74D7FF", "#AB83FF", "#111725", "glass", "compact", "squircle", "gradient")
-        "ocean" -> validate("ocean", "#061826", "#46D2FF", "#63E6BE", "#102B3C", "glass", "system", "circle", "aurora")
-        "ember" -> validate("ember", "#26100C", "#FF8246", "#FF5C9A", "#3A1915", "neon", "compact", "rounded", "warm")
-        "aurora" -> validate("aurora", "#07131B", "#77F2C4", "#91A3FF", "#10252B", "glass", "system", "squircle", "aurora")
-        "sunset" -> validate("sunset", "#211126", "#FFB36B", "#FF6B9A", "#351B34", "neon", "serif", "rounded", "warm")
-        "sage" -> validate("sage", "#101A16", "#A9D6A3", "#E1C58A", "#1D2A22", "flat", "system", "squircle", "gradient")
-        "paper" -> validate("paper", "#F2EEE5", "#315A74", "#A45B42", "#FFF9EE", "flat", "serif", "rounded", "solid")
-        "graphite" -> validate("graphite", "#15171B", "#E0E4EA", "#8EA7C1", "#24272D", "flat", "compact", "circle", "solid")
+        "midnight" -> validate("midnight", "#05080E", "#74D7FF", "#AB83FF", "#111725", "glass", "compact", "squircle", "gradient", "compact")
+        "ocean" -> validate("ocean", "#061826", "#46D2FF", "#63E6BE", "#102B3C", "glass", "system", "circle", "aurora", "wide")
+        "ember" -> validate("ember", "#26100C", "#FF8246", "#FF5C9A", "#3A1915", "neon", "compact", "rounded", "warm", "dense")
+        "aurora" -> validate("aurora", "#07131B", "#77F2C4", "#91A3FF", "#10252B", "glass", "system", "squircle", "aurora", "grid")
+        "sunset" -> validate("sunset", "#211126", "#FFB36B", "#FF6B9A", "#351B34", "neon", "serif", "rounded", "warm", "wide")
+        "sage" -> validate("sage", "#101A16", "#A9D6A3", "#E1C58A", "#1D2A22", "flat", "system", "squircle", "gradient", "compact")
+        "paper" -> validate("paper", "#F2EEE5", "#315A74", "#A45B42", "#FFF9EE", "flat", "serif", "rounded", "solid", "grid")
+        "graphite" -> validate("graphite", "#15171B", "#E0E4EA", "#8EA7C1", "#24272D", "flat", "compact", "circle", "solid", "dense")
         else -> null
     }
 
-    /** Theme suggestions are abstract palettes only; no character or brand artwork is bundled. */
+    /** Theme suggestions use abstract color and geometry, never bundled character artwork. */
     fun suggestedPalette(name: String): Values {
         val normalized = name.trim().lowercase()
         return when {
-            "spider" in normalized || "web hero" in normalized -> validate(name, "#0B1020", "#E62429", "#1E5AA8", "#14213D", "neon")
+            "spider" in normalized || "web hero" in normalized -> validate(name, "#0B1020", "#E62429", "#1E5AA8", "#14213D", "neon", "compact", "squircle", "gradient", "dense")
             "ocean" in normalized -> builtIn("ocean")!!.copy(name = name.trim())
             "sunset" in normalized || "ember" in normalized -> builtIn("sunset")!!.copy(name = name.trim())
             "forest" in normalized || "sage" in normalized -> builtIn("sage")!!.copy(name = name.trim())
@@ -99,7 +133,7 @@ object ThemeSpec {
     }
 
     fun suggestedWallpaperQuery(name: String): String = when {
-        "spider" in name.lowercase() || "web hero" in name.lowercase() -> "abstract red blue geometric wallpaper"
+        "spider" in name.lowercase() || "web hero" in name.lowercase() -> "abstract red blue geometric web pattern wallpaper"
         "ocean" in name.lowercase() -> "abstract ocean blue gradient wallpaper"
         "ember" in name.lowercase() -> "abstract orange red gradient wallpaper"
         else -> "abstract colorful geometric wallpaper"
