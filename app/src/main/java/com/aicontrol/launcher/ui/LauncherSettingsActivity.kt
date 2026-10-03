@@ -16,6 +16,7 @@ import android.widget.TextView
 import android.widget.Toast
 import com.aicontrol.launcher.actions.ActionEngine
 import com.aicontrol.launcher.icons.IconPackManager
+import com.aicontrol.launcher.icons.IconPackStore
 
 @SuppressLint("SetTextI18n")
 class LauncherSettingsActivity : Activity() {
@@ -116,10 +117,15 @@ class LauncherSettingsActivity : Activity() {
         packSpinner = spinner(packs.map { it.label }, packs.firstOrNull { it.packageName == engine.installedIconPack() }?.label ?: packs.first().label)
         root.addView(row("Icon pack", packSpinner))
         root.addView(TextView(this).apply {
-            text = "Only compatible installed ADW/Nova-style icon packs are listed. No third-party APK is installed or changed."
+            text = "Installed packs using Nova's documented com.novalauncher.THEME + res/xml/appfilter.xml format (or the compatible ADW theme action) can replace matching app icons. Private Nova backups and other proprietary formats are not supported. Packs are not downloaded or installed here."
             textSize = 11f
             setTextColor(UiTheme.textMuted)
             setPadding(dp(4), dp(6), dp(4), dp(8))
+        })
+        root.addView(actionButton("Find icon packs on Google Play") {
+            IconPackStore.open(this).onFailure {
+                Toast.makeText(this, it.message ?: "Could not open Google Play search", Toast.LENGTH_LONG).show()
+            }
         })
 
         root.addView(section("Assistant"))

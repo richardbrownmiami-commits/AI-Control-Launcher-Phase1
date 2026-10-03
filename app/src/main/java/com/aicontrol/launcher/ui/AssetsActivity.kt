@@ -4,11 +4,12 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.BitmapFactory
-import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
+import android.view.View
 import android.widget.*
+import com.aicontrol.launcher.actions.ActionEngine
 import com.aicontrol.launcher.assets.AssetAttribution
 import com.aicontrol.launcher.assets.AssetCatalog
 import com.aicontrol.launcher.assets.AssetImporter
@@ -36,11 +37,15 @@ class AssetsActivity : Activity() {
     private lateinit var catalog: AssetCatalog
     private lateinit var manager: LauncherAssetManager
     private lateinit var list: LinearLayout
+    private lateinit var searchProgress: ProgressBar
+    private lateinit var searchProgressLabel: TextView
+    private lateinit var searchRow: LinearLayout
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        UiTheme.bind(ActionEngine(this))
         catalog = AssetCatalog(this)
         manager = LauncherAssetManager(this)
         buildUi()
@@ -51,12 +56,13 @@ class AssetsActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(18), dp(18), dp(18))
-            background = UiTheme.gradient(0f)
+            background = UiTheme.background()
         }
         root.addView(TextView(this).apply {
-            text = "Launcher Assets"
+            text = "Wallpaper & assets"
             textSize = 24f
-            setTextColor(Color.WHITE)
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            setTextColor(UiTheme.textPrimary)
         })
         root.addView(TextView(this).apply {
             text = "Your private library. Choose an image from Downloads, or search Commons for reusable wallpaper."
@@ -71,11 +77,27 @@ class AssetsActivity : Activity() {
         }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(8) })
         root.addView(buttons)
         root.addView(TextView(this).apply {
-            text = "Open-license search runs only when you request it. Each result shows its creator, license, and source before download. Local images are copied into app-private storage."
+            text = "Open-license search runs only when you request it. Each result shows creator, license, and source before download. Local images are copied into app-private storage. PNG icon sets here are image assets, not installable APK packs; compatible Nova/ADW packs are installed Android apps managed in Launcher settings. Widgets are provided by installed apps."
             textSize = 11f
             setTextColor(UiTheme.textMuted)
             setPadding(0, dp(8), 0, dp(8))
         })
+        searchRow = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(5), dp(10), dp(5))
+            background = UiTheme.rounded(UiTheme.card2, 14f, UiTheme.accent, 1)
+            visibility = View.GONE
+        }
+        searchProgress = ProgressBar(this).apply { isIndeterminate = true }
+        searchProgressLabel = TextView(this).apply {
+            text = "Searching Wikimedia Commons…"
+            textSize = 11f
+            setTextColor(UiTheme.textPrimary)
+            setPadding(dp(9), 0, 0, 0)
+        }
+        searchRow.addView(searchProgress, LinearLayout.LayoutParams(dp(22), dp(22)))
+        searchRow.addView(searchProgressLabel)
+        root.addView(searchRow, LinearLayout.LayoutParams(-1, dp(38)).apply { bottomMargin = dp(5) })
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(ScrollView(this).apply { addView(list) }, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
@@ -194,7 +216,8 @@ class AssetsActivity : Activity() {
     }
 
     private fun searchWallpapers(query: String) {
-        Toast.makeText(this, "Searching Wikimedia Commons…", Toast.LENGTH_SHORT).show()
+        searchProgressLabel.text = "Searching Wikimedia Commons…"
+        searchRow.visibility = View.VISIBLE
         scope.launch {
             try {
                 val results = withContext(Dispatchers.IO) { CreativeCommonsAssetSearch().search(query) }
@@ -212,15 +235,49 @@ class AssetsActivity : Activity() {
                     .setMessage(error.message ?: "Unable to reach Wikimedia Commons.")
                     .setPositiveButton(android.R.string.ok, null)
                     .show()
+            } finally {
+                searchRow.visibility = View.GONE
             }
         }
     }
 
     private fun showCandidates(results: List<WallpaperCandidate>) {
-        val labels = results.map { "${it.title}\n${it.license} · ${it.creator}" }.toTypedArray()
+        val cards = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(10), dp(4), dp(10), dp(6))
+        }
+        results.forEach { candidate ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(13), dp(10), dp(13), dp(10))
+                background = UiTheme.rounded(UiTheme.card, 17f, UiTheme.accent, 1)
+            }
+            card.addView(TextView(this).apply {
+                text = candidate.title
+                textSize = 14f
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                setTextColor(UiTheme.textPrimary)
+            })
+            card.addView(TextView(this).apply {
+                text = "${candidate.license}  ·  ${candidate.creator}"
+                textSize = 10f
+                setTextColor(UiTheme.textMuted)
+                setPadding(0, dp(3), 0, dp(5))
+            })
+            val actions = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+            actions.addView(actionButton("Source & license") {
+                runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(candidate.pageUrl))) }
+                    .onFailure { Toast.makeText(this@AssetsActivity, "Could not open the Commons source page", Toast.LENGTH_LONG).show() }
+            }, LinearLayout.LayoutParams(0, dp(38), 1f))
+            actions.addView(actionButton("Review & download") { reviewCandidate(candidate) },
+                LinearLayout.LayoutParams(0, dp(38), 1f).apply { leftMargin = dp(5) })
+            card.addView(actions)
+            cards.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) })
+        }
+        val scroll = ScrollView(this).apply { addView(cards) }
         AlertDialog.Builder(this)
-            .setTitle("Reusable wallpapers (${results.size})")
-            .setItems(labels) { _, which -> reviewCandidate(results[which]) }
+            .setTitle("Reuse-cleared results · ${results.size}")
+            .setView(scroll)
             .setNegativeButton("Close", null)
             .show()
     }
@@ -344,7 +401,7 @@ class AssetsActivity : Activity() {
         section("Wallpapers", catalog.listWallpapers(), true)
         section("Images", catalog.listImages(), false)
         section("Icon overrides", catalog.listIconOverrides(), false)
-        section("Icon packs", catalog.listIconPacks(), true)
+        section("Local PNG icon sets", catalog.listIconPacks(), true)
         section("Custom themes", catalog.listThemes(), false)
         section("Styles", catalog.listStyles(), false)
     }
@@ -396,7 +453,7 @@ class AssetsActivity : Activity() {
                             "Wallpapers" -> catalog.deleteWallpaper(file.name)
                             "Images" -> catalog.deleteImage(file.name)
                             "Icon overrides" -> catalog.deleteIconOverride(file.name)
-                            "Icon packs" -> catalog.deleteIconPack(file.name)
+                            "Local PNG icon sets" -> catalog.deleteIconPack(file.name)
                             "Styles" -> catalog.deleteStyle(file.name)
                             else -> catalog.deleteTheme(file.name)
                         }

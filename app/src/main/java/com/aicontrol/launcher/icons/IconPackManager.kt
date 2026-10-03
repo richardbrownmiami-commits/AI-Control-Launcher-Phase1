@@ -3,7 +3,6 @@ package com.aicontrol.launcher.icons
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import android.util.Xml
 import org.xmlpull.v1.XmlPullParser
@@ -20,7 +19,9 @@ class IconPackManager(private val context: Context) {
         val found = linkedMapOf<String, InstalledIconPack>()
         actions.forEach { action ->
             val intent = Intent(action)
-            pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY).forEach { ri ->
+            // Nova's documented theme filter may contain the action but no CATEGORY_DEFAULT.
+            // MATCH_DEFAULT_ONLY silently hides those valid packs, so query the action directly.
+            pm.queryIntentActivities(intent, 0).forEach { ri ->
                 val ai = ri.activityInfo.applicationInfo
                 if (ai.packageName == context.packageName) return@forEach
                 found[ai.packageName] = InstalledIconPack(
@@ -30,6 +31,18 @@ class IconPackManager(private val context: Context) {
             }
         }
         return found.values.sortedBy { it.label.lowercase() }
+    }
+
+    /** Human-readable choices mapped only to packages returned by the installed-pack query. */
+    fun assistantChoices(): Map<String, String> {
+        val packs = installedPacks()
+        val duplicateLabels = packs.groupingBy { it.label.trim().lowercase() }.eachCount()
+        return packs.associate { pack ->
+            val choice = if ((duplicateLabels[pack.label.trim().lowercase()] ?: 0) > 1) {
+                "${pack.label} (${pack.packageName})"
+            } else pack.label
+            choice to pack.packageName
+        }
     }
 
     fun iconDrawable(packPackage: String, packageName: String, activityName: String): Drawable? {

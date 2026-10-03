@@ -21,6 +21,8 @@ import com.aicontrol.launcher.ai.AiTurn
 import com.aicontrol.launcher.ai.createProvider
 import com.aicontrol.launcher.apps.AppRepository
 import com.aicontrol.launcher.data.SettingsStore
+import com.aicontrol.launcher.icons.IconPackManager
+import com.aicontrol.launcher.icons.IconPackStore
 import com.aicontrol.launcher.nlp.AppTarget
 import com.aicontrol.launcher.nlp.LauncherCommand
 import com.aicontrol.launcher.nlp.LocalPromptInterpreter
@@ -48,6 +50,7 @@ class AssistantActivity : Activity() {
 
     private lateinit var engine: ActionEngine
     private lateinit var appRepository: AppRepository
+    private lateinit var iconPacks: IconPackManager
     private lateinit var transcript: LinearLayout
     private lateinit var transcriptScroll: ScrollView
     private lateinit var composer: EditText
@@ -70,6 +73,7 @@ class AssistantActivity : Activity() {
         super.onCreate(state)
         engine = ActionEngine(this)
         appRepository = AppRepository(this)
+        iconPacks = IconPackManager(this)
         UiTheme.bind(engine)
         loadThread()
         buildUi()
@@ -104,7 +108,7 @@ class AssistantActivity : Activity() {
                 setTextColor(UiTheme.textPrimary)
             })
             addView(TextView(this@AssistantActivity).apply {
-                text = "Themes · layout · licensed wallpaper"
+                text = "Themes · licensed wallpaper · installed icon packs"
                 textSize = 11f
                 setTextColor(UiTheme.textMuted)
             })
@@ -241,28 +245,31 @@ class AssistantActivity : Activity() {
                 setTextColor(UiTheme.textPrimary)
             })
             welcome.addView(TextView(this).apply {
-                text = "Try “make a calm ocean theme”, “find a reusable abstract wallpaper”, or ask a follow-up question."
+                text = "Choose a ready-made theme, search reusable wallpapers, or manage a Nova-compatible installed icon pack."
                 textSize = 12f
                 gravity = Gravity.CENTER
                 setTextColor(UiTheme.textMuted)
                 setPadding(0, dp(7), 0, dp(14))
             })
             val examples = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-            listOf("New theme", "Wallpaper", "Help").forEach { label ->
+            listOf("Presets", "Wallpaper", "Icons", "Help").forEach { label ->
                 examples.addView(Button(this@AssistantActivity).apply {
                     text = label
                     textSize = 10f
                     setTextColor(UiTheme.textPrimary)
                     background = UiTheme.rounded(UiTheme.card2, 16f, UiTheme.accent, 1)
                     setOnClickListener {
-                        composer.setText(when (label) {
-                            "New theme" -> "Create a warm, calm theme for my home screen"
-                            "Wallpaper" -> "Find a legal, reusable abstract wallpaper for a calm theme"
-                            else -> "What can you help me with?"
-                        })
-                        composer.setSelection(composer.text.length)
+                        when (label) {
+                            "Presets" -> startActivity(Intent(this@AssistantActivity, ThemeGalleryActivity::class.java))
+                            "Wallpaper" -> startActivity(Intent(this@AssistantActivity, AssetsActivity::class.java))
+                            "Icons" -> startActivity(Intent(this@AssistantActivity, LauncherSettingsActivity::class.java))
+                            else -> {
+                                composer.setText("What can you help me with?")
+                                composer.setSelection(composer.text.length)
+                            }
+                        }
                     }
-                }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(3); rightMargin = dp(3) })
+                }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(2); rightMargin = dp(2) })
             }
             welcome.addView(examples)
             transcript.addView(welcome, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(28) })
@@ -345,7 +352,9 @@ class AssistantActivity : Activity() {
         busy = true
         sendButton.isEnabled = false
         setStatus("Thinking with ${settings.provider}…", true)
-        val state = "Current appearance: theme=${engine.theme()}, layout=${engine.layout()}, style=${engine.style()}. Available themes: ${engine.availableThemes().sorted().joinToString(", ")}."
+        val state = "Current appearance: theme=${engine.theme()}, layout=${engine.layout()}, style=${engine.style()}. " +
+            "Available themes: ${engine.availableThemes().sorted().joinToString(", ")}. " +
+            "Installed compatible icon packs: ${iconPacks.assistantChoices().keys.sorted().ifEmpty { listOf("none") }.joinToString(", ")}."
         val priorTurns = entries.dropLast(1).filter { it.role == "user" || it.role == "assistant" }
         val withoutUnansweredLastPrompt = if (priorTurns.lastOrNull()?.role == "user") priorTurns.dropLast(1) else priorTurns
         val history = withoutUnansweredLastPrompt.takeLast(8).dropWhile { it.role == "assistant" }
@@ -354,7 +363,7 @@ class AssistantActivity : Activity() {
             try {
                 val reply = withContext(Dispatchers.IO) { provider.chat(prompt, state, history).getOrThrow() }
                 val decision = try {
-                    AiPlanValidator.parse(reply.text, engine.availableThemes())
+                    AiPlanValidator.parse(reply.text, engine.availableThemes(), iconPacks.assistantChoices())
                 } catch (error: Exception) {
                     appendStatus("The provider replied, but its plan could not be read: ${error.message ?: "Invalid response format."} Nothing was changed. Try rephrasing or asking for plain guidance.")
                     return@launch
@@ -426,6 +435,8 @@ class AssistantActivity : Activity() {
                 AiLauncherAction.AddWidget -> "Open Android’s widget picker"
                 is AiLauncherAction.SetLayout -> "Set layout to ${action.value}"
                 is AiLauncherAction.SetStyle -> "Set card style to ${action.value}"
+                is AiLauncherAction.ApplyInstalledIconPack -> "Apply installed icon pack ${action.label} (only mapped apps change)"
+                AiLauncherAction.BrowseIconPacks -> "Open the official Google Play icon-pack search; installation remains under your control"
             }) }
         }
         card.addView(TextView(this).apply {
@@ -443,7 +454,11 @@ class AssistantActivity : Activity() {
             setOnClickListener { pendingPlan = null; renderTranscript() }
         }, LinearLayout.LayoutParams(0, dp(42), 1f))
         buttons.addView(Button(this).apply {
-            text = if (plan.actions.any { it is AiLauncherAction.SearchAssets }) "Confirm & find wallpaper" else "Confirm & apply"
+            text = when {
+                plan.actions.any { it is AiLauncherAction.SearchAssets } -> "Confirm & find wallpaper"
+                plan.actions.any { it === AiLauncherAction.BrowseIconPacks } -> "Confirm & browse packs"
+                else -> "Confirm & apply"
+            }
             textSize = 11f
             setTextColor(Color.WHITE)
             background = UiTheme.gradient(16f)
@@ -538,12 +553,23 @@ class AssistantActivity : Activity() {
             }
             var query: String? = null
             var addWidget = false
+            var browseIconPacks = false
+            var iconPackApplied = false
             plan.actions.forEach { action ->
                 when (action) {
                     is AiLauncherAction.SearchAssets -> query = action.query
                     AiLauncherAction.AddWidget -> addWidget = true
                     is AiLauncherAction.SetLayout -> engine.setLayout(action.value)
                     is AiLauncherAction.SetStyle -> engine.setStyle(action.value)
+                    is AiLauncherAction.ApplyInstalledIconPack -> {
+                        check(iconPacks.installedPacks().any { it.packageName == action.packageName }) {
+                            "That icon pack is no longer installed or compatible. No pack was applied."
+                        }
+                        engine.setInstalledIconPack(action.packageName)
+                        iconPacks.clearCache()
+                        iconPackApplied = true
+                    }
+                    AiLauncherAction.BrowseIconPacks -> browseIconPacks = true
                 }
             }
             UiTheme.bind(engine)
@@ -554,8 +580,15 @@ class AssistantActivity : Activity() {
                 addWidget -> startActivity(Intent(this, MainActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                     .putExtra(MainActivity.EXTRA_REQUEST_ADD_WIDGET, true))
+                browseIconPacks -> IconPackStore.open(this).getOrThrow()
             }
-            setStatus("Confirmed. Theme and layout actions were applied successfully.", true)
+            setStatus(when {
+                query != null -> "Confirmed. Wallpaper search is open; review a result and its license before downloading."
+                addWidget -> "Confirmed. Choose an installed widget in Android's picker."
+                browseIconPacks -> "Confirmed. Google Play search is open; install a pack there, then select it in Launcher settings."
+                iconPackApplied -> "Confirmed. The installed icon pack is selected and will render on the launcher when you return."
+                else -> "Confirmed. The reviewed theme and layout changes were applied."
+            }, true)
         } catch (error: Exception) {
             appendStatus("Could not apply the confirmed plan: ${error.message ?: "Launcher rejected the change."}")
         }

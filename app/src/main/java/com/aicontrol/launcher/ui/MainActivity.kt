@@ -27,6 +27,7 @@ import com.aicontrol.launcher.ai.createProvider
 import com.aicontrol.launcher.data.SettingsStore
 import com.aicontrol.launcher.data.WorkspaceStore
 import com.aicontrol.launcher.icons.IconPackManager
+import com.aicontrol.launcher.icons.IconPackStore
 import com.aicontrol.launcher.nlp.AppTarget
 import com.aicontrol.launcher.nlp.LauncherCommand
 import com.aicontrol.launcher.nlp.LocalPromptInterpreter
@@ -144,21 +145,26 @@ class MainActivity : Activity() {
 
         val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         top.addView(TextView(this).apply {
-            text = "AI Launcher"
-            textSize = 18f
+            text = "Home"
+            textSize = 16f
             typeface = UiTheme.font()
             setTextColor(UiTheme.textPrimary)
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         })
         fun topButton(label: String, width: Int, action: () -> Unit) = Button(this).apply {
             text = label
+            isAllCaps = false
             textSize = 10f
+            minWidth = 0
+            minHeight = 0
+            setPadding(dp(3), 0, dp(3), 0)
             setTextColor(UiTheme.textPrimary)
             background = UiTheme.rounded(UiTheme.card, 16f, UiTheme.accent, 1)
             setOnClickListener { action() }
             layoutParams = LinearLayout.LayoutParams(dp(width), dp(38)).apply { leftMargin = dp(4) }
         }
         top.addView(topButton("Themes", 58) { startActivity(Intent(this, ThemeGalleryActivity::class.java)) })
+        top.addView(topButton("Assets", 52) { startActivity(Intent(this, AssetsActivity::class.java)) })
         top.addView(topButton("Settings", 62) { startActivity(Intent(this, LauncherSettingsActivity::class.java)) })
         top.addView(topButton("Apps", 48) { showDrawer() })
         top.addView(topButton("AI", 40) { startActivity(Intent(this, AssistantActivity::class.java)) })
@@ -372,7 +378,7 @@ class MainActivity : Activity() {
                 })
                 addView(TextView(this@MainActivity).apply {
                     val active = SettingsStore(this@MainActivity).activeKey().isNotBlank()
-                    text = if (active) "Continue a conversation · themes & wallpaper" else "Offline theme helper · set up AI anytime"
+                    text = if (active) "Continue · presets, wallpapers & icon packs" else "Offline themes · add an AI provider anytime"
                     textSize = 10f
                     setTextColor(UiTheme.textMuted)
                 })
@@ -470,7 +476,8 @@ class MainActivity : Activity() {
         aiBusy = true
         updateAssistantCaption()
         val state = "Current appearance: theme=${engine.theme()}, layout=${engine.layout()}, style=${engine.style()}. " +
-            "Available themes: ${engine.availableThemes().sorted().joinToString(", ")}."
+            "Available themes: ${engine.availableThemes().sorted().joinToString(", ")}. " +
+            "Installed compatible icon packs: ${iconPacks.assistantChoices().keys.sorted().ifEmpty { listOf("none") }.joinToString(", ")}."
         Toast.makeText(this, "Contacting ${settings.provider}…", Toast.LENGTH_SHORT).show()
         aiScope.launch {
             try {
@@ -478,7 +485,7 @@ class MainActivity : Activity() {
                     provider.chat(prompt, state, aiHistory.toList()).getOrThrow()
                 }
                 val decision = try {
-                    AiPlanValidator.parse(reply.text, engine.availableThemes())
+                    AiPlanValidator.parse(reply.text, engine.availableThemes(), iconPacks.assistantChoices())
                 } catch (error: Exception) {
                     showAiValidationFailure(reply.text, error)
                     return@launch
@@ -584,6 +591,8 @@ class MainActivity : Activity() {
                 AiLauncherAction.AddWidget -> "Open Android’s widget picker so you can choose an installed widget."
                 is AiLauncherAction.SetLayout -> "Set launcher layout to ‘${action.value}’."
                 is AiLauncherAction.SetStyle -> "Set card style to ‘${action.value}’."
+                is AiLauncherAction.ApplyInstalledIconPack -> "Apply installed icon pack ‘${action.label}’ (${action.packageName}); only matching icons change."
+                AiLauncherAction.BrowseIconPacks -> "Open the official Google Play icon-pack search; installation remains under your control."
             }
         }
         val body = LinearLayout(this).apply {
@@ -605,7 +614,9 @@ class MainActivity : Activity() {
                 setPadding(0, dp(12), 0, 0)
             })
         }
-        val continuation = plan.actions.any { it is AiLauncherAction.SearchAssets || it === AiLauncherAction.AddWidget }
+        val continuation = plan.actions.any {
+            it is AiLauncherAction.SearchAssets || it === AiLauncherAction.AddWidget || it === AiLauncherAction.BrowseIconPacks
+        }
         val dialog = AlertDialog.Builder(this)
             .setTitle("Review AI plan")
             .setView(ScrollView(this).apply { addView(body) })
@@ -631,12 +642,21 @@ class MainActivity : Activity() {
         }
         var assetQuery: String? = null
         var chooseWidget = false
+        var browseIconPacks = false
         plan.actions.forEach { action ->
             when (action) {
                 is AiLauncherAction.SearchAssets -> assetQuery = action.query
                 AiLauncherAction.AddWidget -> chooseWidget = true
                 is AiLauncherAction.SetLayout -> engine.setLayout(action.value)
                 is AiLauncherAction.SetStyle -> engine.setStyle(action.value)
+                is AiLauncherAction.ApplyInstalledIconPack -> {
+                    check(iconPacks.installedPacks().any { it.packageName == action.packageName }) {
+                        "That icon pack is no longer installed or compatible. No pack was applied."
+                    }
+                    engine.setInstalledIconPack(action.packageName)
+                    iconPacks.clearCache()
+                }
+                AiLauncherAction.BrowseIconPacks -> browseIconPacks = true
             }
         }
         commandInput.text.clear()
@@ -645,8 +665,9 @@ class MainActivity : Activity() {
             assetQuery != null -> startActivity(Intent(this, AssetsActivity::class.java)
                 .putExtra(AssetsActivity.EXTRA_SUGGESTED_QUERY, assetQuery))
             chooseWidget -> addAndroidWidget()
+            browseIconPacks -> IconPackStore.open(this).getOrThrow()
         }
-        Toast.makeText(this, "Confirmed plan applied", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Confirmed plan applied. You can change installed icon packs in Launcher settings.", Toast.LENGTH_SHORT).show()
     }
 
     private fun reviewPrompt(result: PromptInterpretation.Ready, installed: List<AppInfo>) {

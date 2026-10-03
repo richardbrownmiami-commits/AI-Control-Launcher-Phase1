@@ -14,6 +14,8 @@ sealed class AiLauncherAction {
     object AddWidget : AiLauncherAction()
     data class SetLayout(val value: String) : AiLauncherAction()
     data class SetStyle(val value: String) : AiLauncherAction()
+    data class ApplyInstalledIconPack(val label: String, val packageName: String) : AiLauncherAction()
+    object BrowseIconPacks : AiLauncherAction()
 }
 
 data class AiLauncherPlan(
@@ -38,7 +40,11 @@ object AiPlanValidator {
     private const val MAX_CLARIFICATION_CHARS = 500
     private val supportedLayouts = setOf("grid", "compact", "dense", "wide")
 
-    fun parse(raw: String, availableThemes: Set<String>): AiPlanDecision {
+    fun parse(
+        raw: String,
+        availableThemes: Set<String>,
+        availableIconPacks: Map<String, String> = emptyMap()
+    ): AiPlanDecision {
         require(raw.length <= MAX_RESPONSE_CHARS) { "AI response is too large to review safely." }
         val root = parseResponseObject(raw)
         requireOnlyKeys(root, setOf("message", "clarification", "theme", "actions"), setOf("message"), "response")
@@ -55,7 +61,7 @@ object AiPlanValidator {
         }
 
         val theme = themeObject?.let { parseTheme(it, availableThemes) }
-        val actions = parseActions(actionArray)
+        val actions = parseActions(actionArray, availableIconPacks)
         if (theme == null && actions.isEmpty()) return AiPlanDecision.Conversation(message)
         return AiPlanDecision.Review(AiLauncherPlan(message, theme, actions))
     }
@@ -97,7 +103,7 @@ object AiPlanValidator {
         }
     }
 
-    private fun parseActions(actions: JSONArray?): List<AiLauncherAction> {
+    private fun parseActions(actions: JSONArray?, availableIconPacks: Map<String, String>): List<AiLauncherAction> {
         if (actions == null) return emptyList()
         require(actions.length() <= 3) { "An AI plan may contain at most three supported actions." }
         val result = mutableListOf<AiLauncherAction>()
@@ -132,12 +138,25 @@ object AiPlanValidator {
                     require(style in ThemeSpec.styles) { "Unsupported card style." }
                     AiLauncherAction.SetStyle(style)
                 }
+                "APPLY_ICON_PACK" -> {
+                    requireOnlyKeys(item, setOf("type", "name"), setOf("type", "name"), "icon-pack action")
+                    val requested = requiredString(item, "name", 120)
+                    val match = availableIconPacks.entries.firstOrNull { it.key.equals(requested, ignoreCase = true) }
+                        ?: throw IllegalArgumentException("That icon pack is not installed or is not Nova/ADW-compatible. Install it from Google Play, then try again.")
+                    AiLauncherAction.ApplyInstalledIconPack(match.key, match.value)
+                }
+                "BROWSE_ICON_PACKS" -> {
+                    requireOnlyKeys(item, setOf("type"), setOf("type"), "icon-pack store action")
+                    AiLauncherAction.BrowseIconPacks
+                }
                 else -> throw IllegalArgumentException("Unsupported AI action '$type'. No changes were applied.")
             }
             result += action
         }
-        require(result.count { it is AiLauncherAction.SearchAssets || it === AiLauncherAction.AddWidget } <= 1) {
-            "A plan may open only one external search or Android widget-picker flow at a time."
+        require(result.count {
+            it is AiLauncherAction.SearchAssets || it === AiLauncherAction.AddWidget || it === AiLauncherAction.BrowseIconPacks
+        } <= 1) {
+            "A plan may open only one external search, store, or Android widget-picker flow at a time."
         }
         return result
     }
@@ -179,49 +198,132 @@ object AiPlanValidator {
         }
     }
 
-    /** Accepts common model wrappers without relaxing the typed plan schema. */
+    /** Accept common model wrappers without relaxing the typed plan schema. */
     private fun parseResponseObject(raw: String): JSONObject {
-        val text = raw.trim().removePrefix("\uFEFF")
-        val starts = text.indices.filter { text[it] == '{' }
-        for (start in starts) {
-            var depth = 0
-            var inString = false
-            var escaped = false
-            for (index in start until text.length) {
-                val char = text[index]
-                if (inString) {
-                    when {
-                        escaped -> escaped = false
-                        char == '\\' -> escaped = true
-                        char == '"' -> inString = false
-                    }
-                    continue
+        val text = raw.trim().removePrefix("\uFEFF").trim()
+        if (text.isEmpty()) throw IllegalArgumentException("The provider returned an empty reply; no launcher changes were made.")
+        findPlanObject(text, 0)?.let { return it }
+        throw IllegalArgumentException(
+            "Could not find a launcher plan in the provider reply. Return an object with a string 'message' and optional 'clarification', 'theme', and 'actions'. JSON fences, prose, and response/output/content/text wrappers are supported."
+        )
+    }
+
+    private val wrapperKeys = listOf("response", "result", "output", "content", "text", "json", "data", "payload", "choices", "candidate")
+
+    private fun findPlanObject(text: String, depth: Int): JSONObject? {
+        if (depth > 6 || text.length > MAX_RESPONSE_CHARS) return null
+        val wholeObject = runCatching { JSONObject(text) }.getOrNull()
+        if (wholeObject != null) {
+            if (looksLikePlan(wholeObject)) return wholeObject
+            unwrap(wholeObject, depth)?.let { return it }
+        }
+        val wholeArray = runCatching { JSONArray(text) }.getOrNull()
+        if (wholeArray != null) unwrap(wholeArray, depth)?.let { return it }
+
+        // Search balanced JSON values embedded in prose or Markdown, respecting quoted braces.
+        var index = 0
+        while (index < text.length) {
+            if (text[index] != '{' && text[index] != '[') {
+                index++
+                continue
+            }
+            val end = balancedJsonEnd(text, index)
+            if (end == null) {
+                index++
+                continue
+            }
+            val candidate = text.substring(index, end)
+            val objectValue = runCatching { JSONObject(candidate) }.getOrNull()
+            if (objectValue != null) {
+                if (looksLikePlan(objectValue)) return objectValue
+                unwrap(objectValue, depth)?.let { return it }
+            } else {
+                val arrayValue = runCatching { JSONArray(candidate) }.getOrNull()
+                if (arrayValue != null) unwrap(arrayValue, depth)?.let { return it }
+            }
+            index = end
+        }
+
+        // Some APIs return a JSON string whose value is itself serialized plan JSON.
+        val decoded = runCatching { org.json.JSONTokener(text).nextValue() as? String }.getOrNull()
+        if (decoded != null && decoded != text) return findPlanObject(decoded, depth + 1)
+        return null
+    }
+
+    private fun looksLikePlan(value: JSONObject): Boolean =
+        value.opt("message") is String || value.has("theme") || value.has("actions") || value.has("clarification")
+
+    private fun unwrap(value: JSONObject, depth: Int): JSONObject? {
+        for (key in wrapperKeys) {
+            if (!value.has(key) || value.isNull(key)) continue
+            nestedPlan(value.opt(key), depth + 1)?.let { return it }
+        }
+        // A few model adapters place text under message.content rather than a top-level content key.
+        val message = value.optJSONObject("message") ?: return null
+        for (key in listOf("content", "text", "response", "output")) {
+            nestedPlan(message.opt(key), depth + 1)?.let { return it }
+        }
+        return null
+    }
+
+    private fun unwrap(value: JSONArray, depth: Int): JSONObject? {
+        if (depth > 6) return null
+        for (index in 0 until value.length()) {
+            val item = value.opt(index)
+            if (item is JSONObject && looksLikePlan(item)) return item
+            nestedPlan(item, depth + 1)?.let { return it }
+        }
+        return null
+    }
+
+    private fun nestedPlan(value: Any?, depth: Int): JSONObject? = when (value) {
+        is JSONObject -> if (looksLikePlan(value)) value else unwrap(value, depth)
+        is JSONArray -> unwrap(value, depth)
+        is String -> findPlanObject(value.trim(), depth)
+        else -> null
+    }
+
+    private fun balancedJsonEnd(text: String, start: Int): Int? {
+        val opening = text[start]
+        val closing = if (opening == '{') '}' else ']'
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for (index in start until text.length) {
+            val char = text[index]
+            if (inString) {
+                when {
+                    escaped -> escaped = false
+                    char == '\\' -> escaped = true
+                    char == '"' -> inString = false
                 }
-                when (char) {
-                    '"' -> inString = true
-                    '{' -> depth++
-                    '}' -> {
-                        depth--
-                        if (depth == 0) {
-                            val candidate = text.substring(start, index + 1)
-                            val parsed = runCatching { JSONObject(candidate) }.getOrNull()
-                            if (parsed != null) return parsed
-                            break
-                        }
-                        if (depth < 0) break
-                    }
+                continue
+            }
+            when (char) {
+                '"' -> inString = true
+                opening -> depth++
+                closing -> {
+                    depth--
+                    if (depth == 0) return index + 1
+                    if (depth < 0) return null
                 }
             }
         }
-        throw IllegalArgumentException("Could not parse the provider reply as a JSON object. Return one object with message, theme, and actions fields.")
+        return null
     }
 
     private fun requireOnlyKeys(value: JSONObject, allowed: Set<String>, required: Set<String>, label: String) {
         val keys = mutableSetOf<String>()
         val iterator = value.keys()
         while (iterator.hasNext()) keys += iterator.next()
-        require(keys.all { it in allowed } && keys.containsAll(required)) {
-            "The $label contains missing or unsupported fields."
+        val unsupported = (keys - allowed).sorted()
+        val missing = (required - keys).sorted()
+        require(unsupported.isEmpty() && missing.isEmpty()) {
+            buildString {
+                append("The $label is invalid.")
+                if (missing.isNotEmpty()) append(" Missing required field(s): ${missing.joinToString(", ")}.")
+                if (unsupported.isNotEmpty()) append(" Unsupported field(s): ${unsupported.joinToString(", ")}.")
+            }
         }
     }
 }

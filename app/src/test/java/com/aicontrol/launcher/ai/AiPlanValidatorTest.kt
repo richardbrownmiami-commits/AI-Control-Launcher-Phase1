@@ -47,6 +47,48 @@ class AiPlanValidatorTest {
         assertTrue(decision.plan.actions.single() is AiLauncherAction.SearchAssets)
     }
 
+    @Test
+    fun unwrapsSerializedResponseAndProviderContentEnvelopes() {
+        val serialized = """{"response":"{\"message\":\"A preset is ready\",\"theme\":{\"operation\":\"APPLY\",\"name\":\"ocean\"},\"actions\":[]}"}"""
+        val first = AiPlanValidator.parse(serialized, themes) as AiPlanDecision.Review
+        assertEquals("ocean", (first.plan.theme as AiThemeOperation.Apply).name)
+
+        val contentEnvelope = """{"choices":[{"message":{"content":"The plan:\n```json\n{\"message\":\"Wallpaper search\",\"theme\":null,\"actions\":[{\"type\":\"SEARCH_ASSETS\",\"query\":\"soft blue abstract wallpaper\"}]}\n```"}}]}"""
+        val second = AiPlanValidator.parse(contentEnvelope, themes) as AiPlanDecision.Review
+        assertEquals("Wallpaper search", second.plan.response)
+        assertTrue(second.plan.actions.single() is AiLauncherAction.SearchAssets)
+    }
+
+    @Test
+    fun appliesOnlyAnExactInstalledCompatibleIconPack() {
+        val decision = AiPlanValidator.parse(
+            """{"message":"Applying your icons","theme":null,"actions":[{"type":"APPLY_ICON_PACK","name":"Mono Minimal"}]}""",
+            themes,
+            mapOf("Mono Minimal" to "org.example.monominimal")
+        ) as AiPlanDecision.Review
+        val action = decision.plan.actions.single() as AiLauncherAction.ApplyInstalledIconPack
+        assertEquals("Mono Minimal", action.label)
+        assertEquals("org.example.monominimal", action.packageName)
+    }
+
+    @Test
+    fun iconPackStoreActionIsFixedAndHasNoCallerControlledUrl() {
+        val decision = AiPlanValidator.parse(
+            """{"message":"Find compatible packs","theme":null,"actions":[{"type":"BROWSE_ICON_PACKS"}]}""",
+            themes
+        ) as AiPlanDecision.Review
+        assertTrue(decision.plan.actions.single() === AiLauncherAction.BrowseIconPacks)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsIconPackPackageNotPresentInInstalledChoices() {
+        AiPlanValidator.parse(
+            """{"message":"Apply this pack","theme":null,"actions":[{"type":"APPLY_ICON_PACK","name":"unknown","package":"org.attacker.pack"}]}""",
+            themes,
+            mapOf("Mono Minimal" to "org.example.monominimal")
+        )
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun wrapperToleranceDoesNotPermitUnsupportedActions() {
         AiPlanValidator.parse(

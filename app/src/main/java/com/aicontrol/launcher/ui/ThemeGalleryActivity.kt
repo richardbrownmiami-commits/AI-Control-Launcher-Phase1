@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.aicontrol.launcher.actions.ActionEngine
@@ -39,14 +40,24 @@ class ThemeGalleryActivity : Activity() {
             setPadding(dp(18), dp(18), dp(18), dp(10))
             background = UiTheme.background()
         }
-        screenRoot.addView(TextView(this).apply {
+        val heading = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        heading.addView(TextView(this).apply {
             text = "Theme gallery"
             textSize = 27f
             typeface = UiTheme.font()
             setTextColor(UiTheme.textPrimary)
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         })
+        heading.addView(Button(this).apply {
+            text = "Back"
+            textSize = 11f
+            setTextColor(UiTheme.textPrimary)
+            background = UiTheme.rounded(UiTheme.card, 15f, UiTheme.accent, 1)
+            setOnClickListener { finish() }
+        }, LinearLayout.LayoutParams(dp(62), dp(40)))
+        screenRoot.addView(heading)
         screenRoot.addView(TextView(this).apply {
-            text = "Explore original color, typography, icon, and background presets. Preview first; applying changes the current launcher theme."
+            text = "Ready-made presets and your saved themes. Preview the full home-screen style before applying; wallpaper and Android icon packs are managed separately."
             textSize = 12f
             typeface = UiTheme.font()
             setTextColor(UiTheme.textMuted)
@@ -67,9 +78,18 @@ class ThemeGalleryActivity : Activity() {
             visibility = if (engine.hasThemeRollback()) android.view.View.VISIBLE else android.view.View.GONE
         }
         toolbar.addView(undoButton, LinearLayout.LayoutParams(-2, dp(42)))
+        toolbar.addView(Button(this).apply {
+            text = "Wallpaper library"
+            textSize = 10f
+            setTextColor(UiTheme.textPrimary)
+            background = UiTheme.rounded(UiTheme.card, 16f, UiTheme.accent, 1)
+            setOnClickListener { startActivity(android.content.Intent(this@ThemeGalleryActivity, AssetsActivity::class.java)) }
+        }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { leftMargin = dp(7) })
         screenRoot.addView(toolbar)
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        screenRoot.addView(list, LinearLayout.LayoutParams(-1, 0, 1f))
+        val scroll = ScrollView(this).apply { clipToPadding = false; isFillViewport = false }
+        scroll.addView(list)
+        screenRoot.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(screenRoot)
         render()
     }
@@ -81,6 +101,13 @@ class ThemeGalleryActivity : Activity() {
         undoButton.visibility = if (engine.hasThemeRollback()) android.view.View.VISIBLE else android.view.View.GONE
         list.removeAllViews()
         val names = (ThemeSpec.builtInNames + engine.availableThemes()).distinctBy { it.lowercase() }
+        list.addView(TextView(this).apply {
+            text = "READY-MADE THEMES  ·  ${ThemeSpec.builtInNames.size} PRESETS"
+            textSize = 10f
+            typeface = UiTheme.font()
+            setTextColor(UiTheme.textMuted)
+            setPadding(dp(3), dp(11), 0, dp(6))
+        })
         names.forEach { name ->
             val values = engine.themeValues(name)
             val card = LinearLayout(this).apply {
@@ -116,6 +143,21 @@ class ThemeGalleryActivity : Activity() {
                 typeface = fontFor(values.typography)
                 setTextColor(contrast(values.background))
             })
+            val sample = LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(5), dp(7), dp(5), dp(2))
+            }
+            listOf("Home", "Apps", "Dock").forEachIndexed { index, label ->
+                val fill = listOf(values.accent, values.accent2, values.card)[index]
+                sample.addView(TextView(this).apply {
+                    text = label
+                    textSize = 10f
+                    gravity = Gravity.CENTER
+                    setTextColor(contrast(fill))
+                    background = UiTheme.rounded(Color.parseColor(fill), 12f)
+                }, LinearLayout.LayoutParams(0, dp(34), 1f).apply { leftMargin = dp(3); rightMargin = dp(3) })
+            }
+            card.addView(sample)
             val previewButton = Button(this).apply {
                 text = "Preview & apply"
                 setTextColor(contrast(values.background))
