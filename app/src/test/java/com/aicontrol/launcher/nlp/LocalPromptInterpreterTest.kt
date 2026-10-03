@@ -42,6 +42,7 @@ class LocalPromptInterpreterTest {
         assertTrue(result is PromptInterpretation.Ready)
         val values = ((result as PromptInterpretation.Ready).command as LauncherCommand.CreateTheme).values
         assertEquals("Coral reef", values.name)
+        assertEquals(ThemeSpec.DEFAULT_ACCENT, values.accent)
     }
 
     @Test fun resolvesPresetThemeWithoutCreatingAFile() {

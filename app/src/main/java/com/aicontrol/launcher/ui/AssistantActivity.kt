@@ -71,6 +71,7 @@ class AssistantActivity : Activity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         engine = ActionEngine(this)
         appRepository = AppRepository(this)
         iconPacks = IconPackManager(this)
@@ -97,13 +98,13 @@ class AssistantActivity : Activity() {
             background = UiTheme.background()
         }
         val toolbar = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        toolbar.addView(iconButton("‹", "Back to launcher") { finish() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        toolbar.addView(iconButton("‹", "Back to launcher") { finish() }, LinearLayout.LayoutParams(dp(48), dp(48)))
         toolbar.addView(LinearLayout(this@AssistantActivity).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), 0, 0, 0)
             addView(TextView(this@AssistantActivity).apply {
                 text = "Launcher assistant"
-                textSize = 20f
+                textSize = 19f
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 setTextColor(UiTheme.textPrimary)
             })
@@ -113,8 +114,8 @@ class AssistantActivity : Activity() {
                 setTextColor(UiTheme.textMuted)
             })
         }, LinearLayout.LayoutParams(0, -2, 1f))
-        toolbar.addView(iconButton("History", "Show recent prompts") { showPromptHistory() }, LinearLayout.LayoutParams(-2, dp(40)))
-        toolbar.addView(iconButton("⋮", "Assistant options") { showOptions() }, LinearLayout.LayoutParams(dp(42), dp(40)).apply { leftMargin = dp(4) })
+        toolbar.addView(iconButton("History", "Show recent prompts") { showPromptHistory() }, LinearLayout.LayoutParams(-2, dp(48)))
+        toolbar.addView(iconButton("⋮", "Assistant options") { showOptions() }, LinearLayout.LayoutParams(dp(48), dp(48)).apply { leftMargin = dp(4) })
         root.addView(toolbar, LinearLayout.LayoutParams(-1, dp(52)))
 
         val providerCard = LinearLayout(this).apply {
@@ -168,9 +169,9 @@ class AssistantActivity : Activity() {
         val inputRow = LinearLayout(this).apply {
             gravity = Gravity.BOTTOM
             setPadding(dp(6), dp(5), dp(6), dp(5))
-            UiTheme.styleCard(this, UiTheme.card, true)
+            UiTheme.styleCard(this, UiTheme.card, false)
         }
-        inputRow.addView(iconButton("＋", "Choose a local image or file") { pickAttachment() }, LinearLayout.LayoutParams(dp(42), dp(46)))
+        inputRow.addView(iconButton("＋", "Choose a local image or file") { pickAttachment() }, LinearLayout.LayoutParams(dp(44), dp(48)))
         composer = EditText(this).apply {
             hint = "Message your assistant…"
             textSize = 14f
@@ -180,6 +181,7 @@ class AssistantActivity : Activity() {
             setHintTextColor(UiTheme.textMuted)
             setPadding(dp(10), dp(8), dp(8), dp(8))
             background = UiTheme.rounded(Color.TRANSPARENT, 14f)
+            minHeight = dp(40)
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
             imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
             setOnEditorActionListener { _, action, _ ->
@@ -191,11 +193,11 @@ class AssistantActivity : Activity() {
             text = "Send"
             textSize = 12f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setTextColor(Color.WHITE)
+            setTextColor(UiTheme.textOnAccent)
             background = UiTheme.gradient(18f)
             setOnClickListener { sendMessage() }
         }
-        inputRow.addView(sendButton, LinearLayout.LayoutParams(dp(66), dp(44)).apply { leftMargin = dp(4) })
+        inputRow.addView(sendButton, LinearLayout.LayoutParams(dp(72), dp(48)).apply { leftMargin = dp(4) })
         root.addView(inputRow, LinearLayout.LayoutParams(-1, -2))
         root.addView(TextView(this).apply {
             text = "Local attachments stay on this device and are not sent to the AI provider."
@@ -269,7 +271,7 @@ class AssistantActivity : Activity() {
                             }
                         }
                     }
-                }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { leftMargin = dp(2); rightMargin = dp(2) })
+                }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(2); rightMargin = dp(2) })
             }
             welcome.addView(examples)
             transcript.addView(welcome, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(28) })
@@ -298,23 +300,24 @@ class AssistantActivity : Activity() {
             elevation = dp(2).toFloat()
         }
         val sender = when { isStatus -> "STATUS"; isUser -> "YOU"; else -> "ASSISTANT" }
+        val userForeground = UiTheme.contrasting(UiTheme.accent2)
         bubble.addView(TextView(this).apply {
             text = "$sender  ·  ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(entry.time))}"
             textSize = 9f
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setTextColor(if (isStatus) UiTheme.warning else if (isUser) Color.WHITE else UiTheme.accent)
+            setTextColor(if (isStatus) UiTheme.warning else if (isUser) userForeground else UiTheme.accent)
         })
         bubble.addView(TextView(this).apply {
             text = entry.content
             textSize = 14f
-            setTextColor(if (isUser) Color.WHITE else UiTheme.textPrimary)
+            setTextColor(if (isUser) userForeground else UiTheme.textPrimary)
             setPadding(0, dp(3), 0, 0)
         })
         entry.attachment?.let { name ->
             bubble.addView(TextView(this).apply {
                 text = "▧  $name\nLocal file · not uploaded"
                 textSize = 10f
-                setTextColor(if (isUser) Color.WHITE else UiTheme.textMuted)
+                setTextColor(if (isUser) userForeground else UiTheme.textMuted)
                 setPadding(0, dp(7), 0, 0)
             })
         }
@@ -453,7 +456,7 @@ class AssistantActivity : Activity() {
             card.addView(Button(this).apply {
                 text = "Build full theme bundle"
                 textSize = 11f
-                setTextColor(Color.WHITE)
+                setTextColor(UiTheme.textOnAccent)
                 background = UiTheme.gradient(16f)
                 setOnClickListener {
                     runCatching {
@@ -464,7 +467,7 @@ class AssistantActivity : Activity() {
                             .putExtra(AssetsActivity.EXTRA_SUGGESTED_QUERY, ThemeSpec.suggestedWallpaperQuery(draftValues.name)))
                     }.onFailure { appendStatus("Could not start the bundle builder: ${it.message ?: "The draft was not saved."}") }
                 }
-            }, LinearLayout.LayoutParams(-1, dp(40)).apply { bottomMargin = dp(6) })
+            }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(6) })
         }
         if (draftValues != null && plan.actions.isEmpty()) {
             val values = draftValues
@@ -481,7 +484,7 @@ class AssistantActivity : Activity() {
                         }
                         .onFailure { appendStatus("Could not save the theme draft: ${it.message ?: "Storage was unavailable."}") }
                 }
-            }, LinearLayout.LayoutParams(-1, dp(40)).apply { bottomMargin = dp(6) })
+            }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(6) })
         }
         val buttons = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         buttons.addView(Button(this).apply {
@@ -490,7 +493,7 @@ class AssistantActivity : Activity() {
             setTextColor(UiTheme.textPrimary)
             background = UiTheme.rounded(UiTheme.card2, 16f)
             setOnClickListener { pendingPlan = null; renderTranscript() }
-        }, LinearLayout.LayoutParams(0, dp(42), 1f))
+        }, LinearLayout.LayoutParams(0, dp(48), 1f))
         buttons.addView(Button(this).apply {
             text = when {
                 plan.actions.any { it is AiLauncherAction.SearchAssets } && plan.theme is AiThemeOperation.Create -> "Confirm & build theme"
@@ -499,10 +502,10 @@ class AssistantActivity : Activity() {
                 else -> "Confirm & apply"
             }
             textSize = 11f
-            setTextColor(Color.WHITE)
+            setTextColor(UiTheme.textOnAccent)
             background = UiTheme.gradient(16f)
             setOnClickListener { pendingPlan = null; executePlan(plan) }
-        }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { leftMargin = dp(6) })
+        }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(6) })
         card.addView(buttons)
         return card
     }
@@ -524,7 +527,7 @@ class AssistantActivity : Activity() {
             card.addView(Button(this).apply {
                 text = "Build full theme bundle"
                 textSize = 11f
-                setTextColor(Color.WHITE)
+                setTextColor(UiTheme.textOnAccent)
                 background = UiTheme.gradient(16f)
                 setOnClickListener {
                     runCatching {
@@ -537,7 +540,7 @@ class AssistantActivity : Activity() {
                         appendStatus("Could not start the bundle builder: ${it.message ?: "The draft was not saved."}")
                     }
                 }
-            }, LinearLayout.LayoutParams(-1, dp(42)).apply { bottomMargin = dp(8) })
+            }, LinearLayout.LayoutParams(-1, dp(48)).apply { bottomMargin = dp(8) })
         }
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         row.addView(Button(this).apply {
@@ -545,13 +548,13 @@ class AssistantActivity : Activity() {
             setTextColor(UiTheme.textPrimary)
             background = UiTheme.rounded(UiTheme.card2, 16f)
             setOnClickListener { pendingOffline = null; renderTranscript() }
-        }, LinearLayout.LayoutParams(0, dp(42), 1f))
+        }, LinearLayout.LayoutParams(0, dp(48), 1f))
         row.addView(Button(this).apply {
             text = if (result.command is LauncherCommand.LaunchApp) "Open app" else "Apply"
-            setTextColor(Color.WHITE)
+            setTextColor(UiTheme.textOnAccent)
             background = UiTheme.gradient(16f)
             setOnClickListener { pendingOffline = null; executeOffline(result.command) }
-        }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { leftMargin = dp(6) })
+        }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(6) })
         card.addView(row)
         return card
     }

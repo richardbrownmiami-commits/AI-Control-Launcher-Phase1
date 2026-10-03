@@ -124,62 +124,77 @@ class MainActivity : Activity() {
     private fun buildUi() {
         UiTheme.bind(engine)
         root = FrameLayout(this)
-
         wallpaperImage = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             background = UiTheme.homeBackground()
             wallpaperBitmap = assets.activeWallpaper()?.let { ImageAssetValidation.decodeSampled(it, 2048) }
             setImageBitmap(wallpaperBitmap)
+            contentDescription = "Launcher wallpaper"
         }
         root.addView(wallpaperImage, FrameLayout.LayoutParams(-1, -1))
-        val shade = FrameLayout(this).apply {
-            setBackgroundColor(Color.argb(72, Color.red(UiTheme.bg), Color.green(UiTheme.bg), Color.blue(UiTheme.bg)))
-        }
-        root.addView(shade, FrameLayout.LayoutParams(-1, -1))
+        root.addView(FrameLayout(this).apply {
+            setBackgroundColor(Color.argb(52, Color.red(UiTheme.bg), Color.green(UiTheme.bg), Color.blue(UiTheme.bg)))
+        }, FrameLayout.LayoutParams(-1, -1))
 
         content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), dp(10), dp(12), dp(8))
+            setPadding(dp(12), dp(8), dp(12), dp(8))
         }
         root.addView(content, FrameLayout.LayoutParams(-1, -1))
 
         val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         top.addView(TextView(this).apply {
-            text = "Home"
+            text = "Launcher"
             textSize = 16f
-            typeface = UiTheme.font()
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
             setTextColor(UiTheme.textPrimary)
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         })
-        fun topButton(label: String, width: Int, action: () -> Unit) = Button(this).apply {
-            text = label
-            isAllCaps = false
-            textSize = 10f
-            minWidth = 0
-            minHeight = 0
-            setPadding(dp(3), 0, dp(3), 0)
-            setTextColor(UiTheme.textPrimary)
-            background = UiTheme.rounded(UiTheme.card, 16f, UiTheme.accent, 1)
+        fun navAction(glyph: String, label: String, description: String, action: () -> Unit) = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            isClickable = true
+            isFocusable = true
+            contentDescription = description
+            background = UiTheme.rounded(UiTheme.card2, 15f)
+            addView(TextView(this@MainActivity).apply {
+                text = glyph
+                textSize = 15f
+                gravity = Gravity.CENTER
+                setTextColor(UiTheme.accent)
+            }, LinearLayout.LayoutParams(-1, dp(22)))
+            addView(TextView(this@MainActivity).apply {
+                text = label
+                textSize = 9f
+                gravity = Gravity.CENTER
+                setTextColor(UiTheme.textMuted)
+                maxLines = 1
+            }, LinearLayout.LayoutParams(-1, dp(16)))
             setOnClickListener { action() }
-            layoutParams = LinearLayout.LayoutParams(dp(width), dp(38)).apply { leftMargin = dp(4) }
         }
-        top.addView(topButton("Themes", 58) { startActivity(Intent(this, ThemeGalleryActivity::class.java)) })
-        top.addView(topButton("Assets", 52) { startActivity(Intent(this, AssetsActivity::class.java)) })
-        top.addView(topButton("Settings", 62) { startActivity(Intent(this, LauncherSettingsActivity::class.java)) })
-        top.addView(topButton("Apps", 48) { showDrawer() })
-        top.addView(topButton("AI", 40) { startActivity(Intent(this, AssistantActivity::class.java)) })
-        content.addView(top, LinearLayout.LayoutParams(-1, dp(44)))
+        listOf(
+            Triple("◈", "Themes", "Open themes") to { startActivity(Intent(this, ThemeGalleryActivity::class.java)) },
+            Triple("▧", "Assets", "Open wallpaper and asset library") to { startActivity(Intent(this, AssetsActivity::class.java)) },
+            Triple("✦", "Assistant", "Open persistent AI assistant chat") to { startActivity(Intent(this, AssistantActivity::class.java)) },
+            Triple("⚙", "Settings", "Open launcher settings") to { startActivity(Intent(this, LauncherSettingsActivity::class.java)) }
+        ).forEach { (nav, action) ->
+            top.addView(navAction(nav.first, nav.second, nav.third, action), LinearLayout.LayoutParams(dp(50), dp(48)).apply { leftMargin = dp(4) })
+        }
+        content.addView(top, LinearLayout.LayoutParams(-1, dp(52)))
 
         val pageHeader = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         pageTitle = TextView(this).apply {
-            textSize = 12f
-            typeface = UiTheme.font()
-            setTextColor(UiTheme.accent)
+            textSize = 10f
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            setTextColor(UiTheme.textMuted)
+            letterSpacing = 0.06f
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
         pageHeader.addView(pageTitle)
-        pageHeader.addView(smallControl("+ Widget", 76) { addAndroidWidget() })
-        content.addView(pageHeader, LinearLayout.LayoutParams(-1, dp(40)))
+        pageHeader.addView(smallControl("＋  Widget", 88) { addAndroidWidget() }.apply {
+            contentDescription = "Add an Android widget to this page"
+        })
+        content.addView(pageHeader, LinearLayout.LayoutParams(-1, dp(44)))
 
         workspace = SwipeWorkspaceLayout(this) { towardRight ->
             setHomePage(currentPage + if (towardRight) -1 else 1)
@@ -192,74 +207,87 @@ class MainActivity : Activity() {
 
         pageIndicator = LinearLayout(this).apply { gravity = Gravity.CENTER }
         repeat(3) { page ->
-            pageIndicator.addView(View(this).apply {
+            pageIndicator.addView(FrameLayout(this).apply {
                 contentDescription = "${listOf("Left", "Main", "Right")[page]} home page${if (page == currentPage) ", selected" else ""}"
                 isClickable = true
-                background = UiTheme.rounded(if (page == currentPage) UiTheme.accent else UiTheme.textMuted, 4f)
+                isFocusable = true
                 setOnClickListener { setHomePage(page) }
-            }, LinearLayout.LayoutParams(dp(if (page == currentPage) 20 else 6), dp(6)).apply {
-                leftMargin = dp(4); rightMargin = dp(4)
-            })
+                addView(View(this@MainActivity).apply {
+                    tag = "page_indicator_dot"
+                    background = UiTheme.rounded(if (page == currentPage) UiTheme.accent else UiTheme.textMuted, 4f)
+                }, FrameLayout.LayoutParams(dp(if (page == currentPage) 18 else 6), dp(5), Gravity.CENTER))
+            }, LinearLayout.LayoutParams(dp(48), dp(48)))
         }
-        content.addView(pageIndicator, LinearLayout.LayoutParams(-1, dp(22)))
+        content.addView(pageIndicator, LinearLayout.LayoutParams(-1, dp(48)))
 
         val bottom = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(4), dp(4), dp(4), dp(4))
-            UiTheme.styleCard(this, UiTheme.card, true)
+            setPadding(dp(7), dp(4), dp(6), dp(4))
+            background = UiTheme.rounded(UiTheme.card, 23f, UiTheme.textMuted, 1)
         }
         dock = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(0, dp(58), 1f)
+            layoutParams = LinearLayout.LayoutParams(0, dp(56), 1f)
         }
         bottom.addView(dock)
         appDrawerButton = Button(this).apply {
             text = "▦\nApps"
             textSize = 10f
             gravity = Gravity.CENTER
+            isAllCaps = false
             setTextColor(UiTheme.textPrimary)
             contentDescription = "Open app drawer"
-            background = UiTheme.rounded(UiTheme.card2, 17f, UiTheme.accent, 1)
+            background = UiTheme.rounded(UiTheme.card2, 17f)
             setOnClickListener { showDrawer() }
         }
-        bottom.addView(appDrawerButton, LinearLayout.LayoutParams(dp(62), dp(54)).apply { leftMargin = dp(5) })
-        content.addView(bottom, LinearLayout.LayoutParams(-1, dp(66)).apply { topMargin = dp(5) })
+        bottom.addView(appDrawerButton, LinearLayout.LayoutParams(dp(60), dp(54)).apply { leftMargin = dp(5) })
+        content.addView(bottom, LinearLayout.LayoutParams(-1, dp(64)).apply { topMargin = dp(4) })
 
         drawerOverlay = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(12))
+            setPadding(dp(16), dp(14), dp(16), dp(12))
             background = UiTheme.homeBackground()
             visibility = View.GONE
         }
         val drawerTop = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        drawerTop.addView(TextView(this).apply {
-            text = "All apps"
-            textSize = 23f
-            typeface = UiTheme.font()
-            setTextColor(UiTheme.textPrimary)
+        drawerTop.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+            addView(TextView(this@MainActivity).apply {
+                text = "All apps"
+                textSize = 21f
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                setTextColor(UiTheme.textPrimary)
+            })
+            addView(TextView(this@MainActivity).apply {
+                text = "Your installed apps"
+                textSize = 11f
+                setTextColor(UiTheme.textMuted)
+            })
         })
-        drawerTop.addView(smallControl("Home", 58) { hideDrawer() })
-        drawerTop.addView(smallControl("⚙", 42) { startActivity(Intent(this, LauncherSettingsActivity::class.java)) })
-        drawerTop.addView(smallControl("◈", 42) { startActivity(Intent(this, ThemeGalleryActivity::class.java)) })
-        drawerOverlay.addView(drawerTop, LinearLayout.LayoutParams(-1, dp(48)))
+        drawerTop.addView(smallControl("Home", 54) { hideDrawer() })
+        drawerTop.addView(smallControl("Themes", 58) { startActivity(Intent(this, ThemeGalleryActivity::class.java)) })
+        drawerTop.addView(smallControl("⚙", 42) { startActivity(Intent(this, LauncherSettingsActivity::class.java)) }.apply {
+            contentDescription = "Open launcher settings"
+        })
+        drawerOverlay.addView(drawerTop, LinearLayout.LayoutParams(-1, dp(52)))
 
         val drawerActions = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         drawerActions.addView(TextView(this).apply {
-            text = "Installed apps"
-            textSize = 11f
+            text = "Find and launch"
+            textSize = 12f
             setTextColor(UiTheme.textMuted)
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         })
-        drawerActions.addView(smallControlWithView("Sort: ${engine.drawerSort()}", 110) {
+        drawerActions.addView(smallControlWithView("Sort · ${engine.drawerSort()}", 104) {
             val choices = listOf("A–Z", "Z–A", "Package")
             val next = choices[(choices.indexOf(engine.drawerSort()).coerceAtLeast(0) + 1) % choices.size]
             engine.setDrawerSort(next)
-            (it as Button).text = "Sort: $next"
+            (it as Button).text = "Sort · $next"
             renderApps()
         })
-        drawerOverlay.addView(drawerActions, LinearLayout.LayoutParams(-1, dp(36)))
+        drawerOverlay.addView(drawerActions, LinearLayout.LayoutParams(-1, dp(44)))
 
         drawerSearch = EditText(this).apply {
             hint = "Search apps"
@@ -268,10 +296,11 @@ class MainActivity : Activity() {
             typeface = UiTheme.font()
             setTextColor(UiTheme.textPrimary)
             setHintTextColor(UiTheme.textMuted)
-            setPadding(dp(14), 0, dp(14), 0)
-            background = UiTheme.rounded(UiTheme.card, 22f, UiTheme.accent, 1)
+            setPadding(dp(15), 0, dp(15), 0)
+            background = UiTheme.rounded(UiTheme.card, 22f)
+            contentDescription = "Search installed apps"
         }
-        drawerOverlay.addView(drawerSearch, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(4); bottomMargin = dp(8) })
+        drawerOverlay.addView(drawerSearch, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(5); bottomMargin = dp(8) })
         drawerSearch.addTextChangedListener(SearchWatcher { renderApps() })
         val appScroll = ScrollView(this).apply { overScrollMode = ScrollView.OVER_SCROLL_IF_CONTENT_SCROLLS }
         drawerGrid = GridLayout(this).apply {
@@ -282,8 +311,8 @@ class MainActivity : Activity() {
         appScroll.addView(drawerGrid)
         drawerOverlay.addView(appScroll, LinearLayout.LayoutParams(-1, 0, 1f))
         drawerOverlay.addView(TextView(this).apply {
-            text = "Long-press an app to add a shortcut, place it on a page, add it to the dock, or hide it from this launcher."
-            textSize = 10f
+            text = "Touch and hold an app to add it to Home or Dock, or hide it from this launcher."
+            textSize = 11f
             typeface = UiTheme.font()
             setTextColor(UiTheme.textMuted)
             setPadding(dp(4), dp(8), dp(4), 0)
@@ -318,84 +347,65 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
         val body = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(4), dp(4), dp(4), dp(8))
+            setPadding(dp(2), dp(2), dp(2), dp(8))
         }
         if (page == 1) {
             val hero = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(18), dp(13), dp(18), dp(14))
-                background = UiTheme.rounded(UiTheme.card, 24f, UiTheme.accent, 1)
-                elevation = dp(4).toFloat()
+                setPadding(dp(8), dp(3), dp(8), dp(14))
             }
             hero.addView(TextView(this).apply {
-                text = java.text.SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()).format(java.util.Date()).uppercase(Locale.getDefault())
-                textSize = 10f
+                text = java.text.SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()).format(java.util.Date())
+                textSize = 13f
                 typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
                 setTextColor(UiTheme.textMuted)
             })
             hero.addView(android.widget.TextClock(this).apply {
                 format12Hour = "h:mm"
                 format24Hour = "HH:mm"
-                textSize = 40f
+                textSize = 48f
                 typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
                 setTextColor(UiTheme.textPrimary)
                 contentDescription = "Current time"
-            }, LinearLayout.LayoutParams(-1, dp(52)))
-            body.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
-            body.addView(LinearLayout(this).apply {
+                includeFontPadding = false
+            }, LinearLayout.LayoutParams(-1, dp(58)))
+            body.addView(hero, LinearLayout.LayoutParams(-1, -2))
+
+            val search = LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(14), dp(3), dp(8), dp(3))
-                background = UiTheme.rounded(UiTheme.card2, 22f, UiTheme.accent, 1)
+                setPadding(dp(15), 0, dp(7), 0)
+                background = UiTheme.rounded(UiTheme.card, 25f)
+                isClickable = true
+                isFocusable = true
+                contentDescription = "Search installed apps"
+                setOnClickListener { showDrawer(); drawerSearch.requestFocus() }
                 addView(TextView(this@MainActivity).apply {
-                    text = "⌕   Search apps or open your library"
-                    textSize = 12f
+                    text = "⌕"
+                    textSize = 22f
+                    setTextColor(UiTheme.accent)
+                }, LinearLayout.LayoutParams(dp(32), -2))
+                addView(TextView(this@MainActivity).apply {
+                    text = "Search your apps"
+                    textSize = 14f
                     setTextColor(UiTheme.textMuted)
                     layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
                 })
-                addView(smallControl("Apps", 56) { showDrawer() })
-            }, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(8) })
-            val assistantCard = LinearLayout(this).apply {
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(13), dp(10), dp(12), dp(10))
-                background = UiTheme.rounded(UiTheme.card2, 20f, UiTheme.accent2, 1)
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { startActivity(Intent(this@MainActivity, AssistantActivity::class.java)) }
-            }
-            assistantCard.addView(TextView(this).apply {
-                text = "✦"
-                textSize = 24f
-                setTextColor(UiTheme.accent)
-            }, LinearLayout.LayoutParams(dp(38), -2))
-            assistantCard.addView(LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
                 addView(TextView(this@MainActivity).apply {
-                    text = "Launcher assistant"
-                    textSize = 14f
-                    typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-                    setTextColor(UiTheme.textPrimary)
-                })
-                addView(TextView(this@MainActivity).apply {
-                    val active = SettingsStore(this@MainActivity).activeKey().isNotBlank()
-                    text = if (active) "Continue · presets, wallpapers & icon packs" else "Offline themes · add an AI provider anytime"
-                    textSize = 10f
+                    text = "›"
+                    textSize = 21f
+                    gravity = Gravity.CENTER
                     setTextColor(UiTheme.textMuted)
-                })
-            })
-            assistantCard.addView(TextView(this).apply {
-                text = "›"
-                textSize = 24f
-                setTextColor(UiTheme.accent2)
-            })
-            body.addView(assistantCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+                }, LinearLayout.LayoutParams(dp(32), -1))
+            }
+            body.addView(search, LinearLayout.LayoutParams(-1, dp(50)).apply { bottomMargin = dp(12) })
         }
+
         body.addView(TextView(this).apply {
-            text = if (page == 1) "YOUR APPS" else "${if (page == 0) "LEFT" else "RIGHT"} PAGE  ·  YOUR SHORTCUTS"
-            textSize = 10f
-            typeface = UiTheme.font()
-            setTextColor(UiTheme.textMuted)
-            setPadding(dp(4), dp(5), 0, dp(7))
+            text = if (page == 1) "Favourites" else if (page == 0) "Left page" else "Right page"
+            textSize = 14f
+            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+            setTextColor(UiTheme.textPrimary)
+            setPadding(dp(5), dp(7), 0, dp(5))
         })
         val shortcuts = GridLayout(this).apply {
             columnCount = engine.homeColumns()
@@ -406,18 +416,15 @@ class MainActivity : Activity() {
         body.addView(shortcuts, LinearLayout.LayoutParams(-1, -2))
         val widgets = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         pageWidgetContainers += widgets
-        body.addView(widgets, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
-        val hint = TextView(this).apply {
-            text = if (page == 1) "Swipe left or right to move between your three home pages. Touch and hold an app in Apps to add it here."
-                else "Swipe horizontally to move between home pages. Open Apps and touch and hold an icon to place a shortcut here."
+        body.addView(widgets, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
+        body.addView(TextView(this).apply {
+            text = if (page == 1) "Touch and hold an app in Apps to pin it here." else "Swipe to another page, or add a widget above."
             textSize = 11f
             typeface = UiTheme.font()
             setTextColor(UiTheme.textMuted)
             gravity = Gravity.CENTER
-            setPadding(dp(18), dp(14), dp(18), dp(14))
-            background = UiTheme.rounded(UiTheme.card2, 18f)
-        }
-        body.addView(hint, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+            setPadding(dp(12), dp(9), dp(12), dp(9))
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         scroll.addView(body)
         screen.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         return screen
@@ -425,20 +432,26 @@ class MainActivity : Activity() {
 
     private fun smallControl(label: String, width: Int, action: () -> Unit): Button = Button(this).apply {
         text = label
-        textSize = if (label.length > 6) 9f else 11f
+        textSize = if (label.length > 8) 9f else 10f
+        isAllCaps = false
+        minWidth = 0
+        minHeight = 0
         setTextColor(UiTheme.textPrimary)
-        background = UiTheme.rounded(UiTheme.card, 15f, UiTheme.accent, 1)
+        background = UiTheme.rounded(UiTheme.card2, 16f)
         setOnClickListener { action() }
-        layoutParams = LinearLayout.LayoutParams(dp(width), dp(34)).apply { leftMargin = dp(3); rightMargin = dp(2) }
+        layoutParams = LinearLayout.LayoutParams(dp(width), dp(44)).apply { leftMargin = dp(3); rightMargin = dp(2) }
     }
 
     private fun smallControlWithView(label: String, width: Int, action: (View) -> Unit): Button = Button(this).apply {
         text = label
         textSize = 9f
+        isAllCaps = false
+        minWidth = 0
+        minHeight = 0
         setTextColor(UiTheme.textPrimary)
-        background = UiTheme.rounded(UiTheme.card, 15f, UiTheme.accent, 1)
+        background = UiTheme.rounded(UiTheme.card2, 16f)
         setOnClickListener { action(this) }
-        layoutParams = LinearLayout.LayoutParams(dp(width), dp(34)).apply { leftMargin = dp(3); rightMargin = dp(2) }
+        layoutParams = LinearLayout.LayoutParams(dp(width), dp(44)).apply { leftMargin = dp(3); rightMargin = dp(2) }
     }
 
     private fun updateAssistantCaption() {
@@ -728,6 +741,8 @@ class MainActivity : Activity() {
         val accent = Color.parseColor(values.accent)
         val accent2 = Color.parseColor(values.accent2)
         val card = Color.parseColor(values.card)
+        val backgroundText = UiTheme.contrasting(background)
+        val cardText = UiTheme.contrasting(card)
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(18), dp(18), dp(18))
@@ -735,12 +750,12 @@ class MainActivity : Activity() {
             addView(TextView(this@MainActivity).apply {
                 text = "${values.name}  ·  ${values.style.uppercase(Locale.getDefault())}"
                 textSize = 18f
-                setTextColor(Color.WHITE)
+                setTextColor(backgroundText)
             })
             addView(TextView(this@MainActivity).apply {
                 text = "${values.layout} layout · ${values.typography} type · ${values.iconStyle} icons · ${values.backgroundStyle} background. ${values.iconAssets.size} custom app-icon mappings."
                 textSize = 11f
-                setTextColor(Color.LTGRAY)
+                setTextColor(backgroundText)
                 setPadding(0, dp(3), 0, dp(12))
             })
             val samples = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.HORIZONTAL }
@@ -749,13 +764,13 @@ class MainActivity : Activity() {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(4), dp(4), dp(4), dp(4))
                     addView(View(this@MainActivity).apply {
-                        setBackgroundColor(color)
+                        setBackground(UiTheme.rounded(color, 8f))
                         layoutParams = LinearLayout.LayoutParams(-1, dp(38))
                     })
                     addView(TextView(this@MainActivity).apply {
                         text = label
                         textSize = 10f
-                        setTextColor(Color.WHITE)
+                        setTextColor(UiTheme.contrasting(color))
                     })
                 }, LinearLayout.LayoutParams(0, -2, 1f))
             }
@@ -763,7 +778,7 @@ class MainActivity : Activity() {
             addView(TextView(this@MainActivity).apply {
                 text = "Background ${values.background} · Accent ${values.accent}\nSecondary ${values.accent2} · Card ${values.card}"
                 textSize = 10f
-                setTextColor(Color.LTGRAY)
+                setTextColor(backgroundText)
                 setPadding(dp(4), dp(2), dp(4), 0)
             })
             addView(LinearLayout(this@MainActivity).apply {
@@ -771,13 +786,13 @@ class MainActivity : Activity() {
                 setPadding(dp(10), dp(8), dp(10), dp(8))
                 this.background = UiTheme.rounded(card, 14f, accent, 1)
                 addView(View(this@MainActivity).apply {
-                    setBackgroundColor(accent)
+                    setBackground(UiTheme.rounded(accent, 15f))
                     layoutParams = LinearLayout.LayoutParams(dp(30), dp(30))
                 })
                 addView(TextView(this@MainActivity).apply {
                     text = "  App icons     Search     Dock"
                     textSize = 12f
-                    setTextColor(Color.WHITE)
+                    setTextColor(cardText)
                 })
             }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
         }
@@ -840,15 +855,16 @@ class MainActivity : Activity() {
         if (::pageTitle.isInitialized) pageTitle.text = "HOME  ·  ${listOf("LEFT PAGE", "MAIN PAGE", "RIGHT PAGE")[currentPage]}"
         if (::pageIndicator.isInitialized) {
             for (index in 0 until pageIndicator.childCount) {
-                val indicator = pageIndicator.getChildAt(index)
-                indicator.background = UiTheme.rounded(if (index == currentPage) UiTheme.accent else UiTheme.textMuted, 4f)
-                val params = indicator.layoutParams as? LinearLayout.LayoutParams ?: continue
-                val targetWidth = dp(if (index == currentPage) 20 else 6)
+                val target = pageIndicator.getChildAt(index) as? FrameLayout ?: continue
+                val dot = target.getChildAt(0) ?: continue
+                dot.background = UiTheme.rounded(if (index == currentPage) UiTheme.accent else UiTheme.textMuted, 4f)
+                val params = dot.layoutParams as? FrameLayout.LayoutParams ?: continue
+                val targetWidth = dp(if (index == currentPage) 18 else 6)
                 if (params.width != targetWidth) {
                     params.width = targetWidth
-                    indicator.layoutParams = params
+                    dot.layoutParams = params
                 }
-                indicator.contentDescription = "${listOf("Left", "Main", "Right")[index]} home page${if (index == currentPage) ", selected" else ""}"
+                target.contentDescription = "${listOf("Left", "Main", "Right")[index]} home page${if (index == currentPage) ", selected" else ""}"
             }
         }
         homePages.forEachIndexed { index, page ->

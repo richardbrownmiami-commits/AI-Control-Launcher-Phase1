@@ -8,6 +8,16 @@ import org.junit.Test
 
 class ThemeSpecTest {
     @Test
+    fun defaultThemeUsesTheNewRestrainedLauncherPalette() {
+        val values = ThemeSpec.builtIn("default")!!
+        assertEquals("#101319", values.background)
+        assertEquals("#BBC8FF", values.accent)
+        assertEquals("#A9DCCE", values.accent2)
+        assertEquals("#1B1F27", values.card)
+        assertEquals("solid", values.backgroundStyle)
+    }
+
+    @Test
     fun everyBuiltInThemeHasACompleteValidatedBundle() {
         ThemeSpec.builtInNames.forEach { name ->
             val values = ThemeSpec.builtIn(name)

@@ -2,14 +2,14 @@ package com.aicontrol.launcher.theme
 
 /** Validated, platform-independent theme values shared by prompt parsing, presets, and persistence. */
 object ThemeSpec {
-    const val DEFAULT_BACKGROUND = "#080A12"
-    const val DEFAULT_ACCENT = "#46D2FF"
-    const val DEFAULT_ACCENT2 = "#9B5CFF"
-    const val DEFAULT_CARD = "#141723"
+    const val DEFAULT_BACKGROUND = "#101319"
+    const val DEFAULT_ACCENT = "#BBC8FF"
+    const val DEFAULT_ACCENT2 = "#A9DCCE"
+    const val DEFAULT_CARD = "#1B1F27"
     const val DEFAULT_STYLE = "glass"
     const val DEFAULT_TYPOGRAPHY = "system"
     const val DEFAULT_ICON_STYLE = "rounded"
-    const val DEFAULT_BACKGROUND_STYLE = "gradient"
+    const val DEFAULT_BACKGROUND_STYLE = "solid"
     const val DEFAULT_LAYOUT = "grid"
 
     val styles = setOf("glass", "flat", "neon")

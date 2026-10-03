@@ -71,51 +71,75 @@ class AssetsActivity : Activity() {
     private fun buildUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(18), dp(18), dp(18))
+            setPadding(dp(16), dp(10), dp(16), dp(14))
             background = UiTheme.background()
         }
-        root.addView(TextView(this).apply {
-            text = "Wallpaper & assets"
-            textSize = 24f
-            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+        val heading = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        heading.addView(Button(this).apply {
+            text = "‹"
+            textSize = 25f
+            minWidth = 0
+            minHeight = 0
             setTextColor(UiTheme.textPrimary)
+            background = UiTheme.rounded(UiTheme.card2, 16f)
+            contentDescription = "Back"
+            setOnClickListener { finish() }
+        }, LinearLayout.LayoutParams(dp(48), dp(48)))
+        heading.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), 0, 0, 0)
+            addView(TextView(this@AssetsActivity).apply {
+                text = if (pendingThemeName != null) "Theme assets" else "Wallpapers & assets"
+                textSize = 20f
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                setTextColor(UiTheme.textPrimary)
+            })
+            addView(TextView(this@AssetsActivity).apply {
+                text = pendingThemeName?.let { "Building assets for $it" } ?: "Your private visual library"
+                textSize = 11f
+                setTextColor(UiTheme.textMuted)
+            })
         })
-        root.addView(TextView(this).apply {
-            text = pendingThemeName?.let { "Building ‘$it’ · searching reusable wallpaper and matching icon art. Your local Downloads remain untouched unless you explicitly choose a file." }
-                ?: "Your private library. Choose an image from Downloads, or search Commons for reusable wallpaper."
-            setTextColor(UiTheme.textMuted)
-            setPadding(0, dp(6), 0, dp(10))
-        })
+        root.addView(heading, LinearLayout.LayoutParams(-1, dp(52)))
+
+        val intro = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(13), dp(11), dp(13), dp(11))
+            UiTheme.styleCard(this, UiTheme.card, false)
+            addView(TextView(this@AssetsActivity).apply {
+                text = pendingThemeName?.let { "Add a wallpaper or app icon to this theme draft." }
+                    ?: "Import an image you choose, or search for reusable wallpaper. Preview before applying."
+                textSize = 13f
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                setTextColor(UiTheme.textPrimary)
+            })
+            addView(TextView(this@AssetsActivity).apply {
+                text = "Local files stay on-device. Online results show creator and license before download."
+                textSize = 10.5f
+                setTextColor(UiTheme.textMuted)
+                setPadding(0, dp(3), 0, 0)
+            })
+        }
+        root.addView(intro, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7); bottomMargin = dp(8) })
+
         val buttons = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        buttons.addView(actionButton("Import from Downloads") { pickLocalImage() }, LinearLayout.LayoutParams(0, dp(48), 1f))
-        buttons.addView(actionButton("Find free wallpaper") {
+        buttons.addView(actionButton("Import image") { pickLocalImage() }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        buttons.addView(actionButton("Find wallpaper") {
             val query = intent.getStringExtra(EXTRA_SUGGESTED_QUERY) ?: "abstract colorful geometric wallpaper"
             askWallpaperQuery(query)
-        }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(8) })
+        }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(7) })
         root.addView(buttons)
         if (pendingThemeName != null) {
-            root.addView(actionButton("Find open-license art for an app icon") {
+            root.addView(actionButton("Find open-license icon art") {
                 val query = com.aicontrol.launcher.theme.ThemeSpec.suggestedWallpaperQuery(pendingThemeName!!)
                     .replace("wallpaper", "minimal app icon")
                 askWallpaperQuery(query)
-            }, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(5) })
-            root.addView(TextView(this).apply {
-                text = "AI builds from Commons CC-approved images and OpenMoji CC BY-SA icons after your plan confirmation. Local images are optional and stay on-device. No APKs are downloaded."
-                textSize = 10f
-                setTextColor(UiTheme.textMuted)
-                setPadding(dp(3), dp(5), dp(3), dp(4))
-            })
+            }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(6) })
         }
-        root.addView(TextView(this).apply {
-            text = "Open-license search runs only when you request it. Each result shows creator, license, and source before download. Local images are copied into app-private storage. PNG icon sets here are image assets, not installable APK packs; compatible Nova/ADW packs are installed Android apps managed in Launcher settings. Widgets are provided by installed apps."
-            textSize = 11f
-            setTextColor(UiTheme.textMuted)
-            setPadding(0, dp(8), 0, dp(8))
-        })
         searchRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(10), dp(5), dp(10), dp(5))
-            background = UiTheme.rounded(UiTheme.card2, 14f, UiTheme.accent, 1)
+            background = UiTheme.rounded(UiTheme.card2, 14f)
             visibility = View.GONE
         }
         searchProgress = ProgressBar(this).apply { isIndeterminate = true }
@@ -129,20 +153,21 @@ class AssetsActivity : Activity() {
         searchRow.addView(searchProgressLabel, LinearLayout.LayoutParams(0, -2, 1f))
         buildCancelButton = Button(this).apply {
             text = "Cancel"
-            textSize = 9f
+            textSize = 10f
+            isAllCaps = false
             setTextColor(UiTheme.textPrimary)
             background = UiTheme.rounded(UiTheme.card, 12f)
             visibility = View.GONE
             setOnClickListener {
                 buildContinue.set(false)
-                searchProgressLabel.text = "Canceling after the current safe operation…"
+                searchProgressLabel.text = "Canceling after the current operation…"
                 isEnabled = false
             }
         }
-        searchRow.addView(buildCancelButton, LinearLayout.LayoutParams(-2, dp(34)))
-        root.addView(searchRow, LinearLayout.LayoutParams(-1, dp(38)).apply { bottomMargin = dp(5) })
+        searchRow.addView(buildCancelButton, LinearLayout.LayoutParams(-2, dp(44)))
+        root.addView(searchRow, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(7); bottomMargin = dp(5) })
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        root.addView(ScrollView(this).apply { addView(list) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(ScrollView(this).apply { clipToPadding = false; addView(list) }, LinearLayout.LayoutParams(-1, 0, 1f))
         setContentView(root)
         render()
     }
@@ -160,9 +185,13 @@ class AssetsActivity : Activity() {
 
     private fun actionButton(label: String, action: () -> Unit) = Button(this).apply {
         text = label
-        textSize = 11f
+        textSize = 10.5f
+        isAllCaps = false
+        minWidth = 0
+        minHeight = 0
+        setPadding(dp(6), 0, dp(6), 0)
         setTextColor(UiTheme.textPrimary)
-        background = UiTheme.rounded(UiTheme.card, 16f, UiTheme.accent, 1)
+        background = UiTheme.rounded(UiTheme.card2, 15f)
         setOnClickListener { action() }
     }
 
@@ -492,9 +521,9 @@ class AssetsActivity : Activity() {
             actions.addView(actionButton("Source & license") {
                 runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(candidate.pageUrl))) }
                     .onFailure { Toast.makeText(this@AssetsActivity, "Could not open the Commons source page", Toast.LENGTH_LONG).show() }
-            }, LinearLayout.LayoutParams(0, dp(38), 1f))
+            }, LinearLayout.LayoutParams(0, dp(44), 1f))
             actions.addView(actionButton("Review & download") { reviewCandidate(candidate) },
-                LinearLayout.LayoutParams(0, dp(38), 1f).apply { leftMargin = dp(5) })
+                LinearLayout.LayoutParams(0, dp(44), 1f).apply { leftMargin = dp(5) })
             card.addView(actions)
             cards.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) })
         }
@@ -635,55 +664,104 @@ class AssetsActivity : Activity() {
     }
 
     private fun section(title: String, files: List<File>, canApply: Boolean) {
-        list.addView(TextView(this).apply {
-            text = "$title (${files.size})"
-            textSize = 18f
-            setTextColor(UiTheme.accent)
-            setPadding(0, dp(14), 0, dp(6))
-        })
+        val heading = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), dp(12), dp(2), dp(7))
+            addView(TextView(this@AssetsActivity).apply {
+                text = title
+                textSize = 14f
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                setTextColor(UiTheme.textPrimary)
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+            })
+            addView(TextView(this@AssetsActivity).apply {
+                text = files.size.toString()
+                textSize = 10f
+                setTextColor(UiTheme.textMuted)
+                background = UiTheme.rounded(UiTheme.card2, 12f)
+                setPadding(dp(8), dp(4), dp(8), dp(4))
+            })
+        }
+        list.addView(heading)
+        if (files.isEmpty()) {
+            list.addView(TextView(this).apply {
+                text = "Nothing saved here yet"
+                textSize = 11f
+                setTextColor(UiTheme.textMuted)
+                setPadding(dp(4), dp(2), dp(4), dp(7))
+            })
+            return
+        }
         files.forEach { file ->
-            val line = LinearLayout(this).apply {
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(8), dp(6), dp(6), dp(6))
-                UiTheme.styleCard(this, UiTheme.card, true)
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(10), dp(9), dp(10), dp(9))
+                UiTheme.styleCard(this, UiTheme.card, false)
             }
             val attribution: AssetAttribution? = when (title) {
                 "Wallpapers" -> catalog.wallpaperAttribution(file.name)
                 "Images" -> catalog.imageAttribution(file.name)
                 else -> null
             }
-            line.addView(LinearLayout(this).apply {
+            val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+            if (title in setOf("Wallpapers", "Images", "Icon overrides")) {
+                val bitmap = ImageAssetValidation.decodeSampled(file, 128)
+                if (bitmap != null) top.addView(ImageView(this).apply {
+                    setImageBitmap(bitmap)
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    contentDescription = "Preview of ${file.name}"
+                    clipToOutline = true
+                    background = UiTheme.rounded(UiTheme.card2, 12f)
+                }, LinearLayout.LayoutParams(dp(52), dp(52)).apply { rightMargin = dp(10) })
+            }
+            top.addView(LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(TextView(this@AssetsActivity).apply {
                     text = file.name
+                    textSize = 12f
+                    typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
                     setTextColor(UiTheme.textPrimary)
                     maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
                 })
-                if (attribution != null) addView(TextView(this@AssetsActivity).apply {
-                    text = "${attribution.license} · ${attribution.creator}\nSource: ${attribution.sourceUrl}"
-                    textSize = 9f
-                    maxLines = 3
+                addView(TextView(this@AssetsActivity).apply {
+                    text = attribution?.let { "${it.license} · ${it.creator}" } ?: "${(file.length() / 1024).coerceAtLeast(1)} KB"
+                    textSize = 10f
                     setTextColor(UiTheme.textMuted)
+                    maxLines = 2
+                    setPadding(0, dp(3), 0, 0)
                 })
             }, LinearLayout.LayoutParams(0, -2, 1f))
-            if (canApply && title == "Wallpapers") {
-                line.addView(actionButton("Use here") { useWallpaper(file) })
-                line.addView(actionButton("Device") { confirmDeviceWallpaper(file) }.apply {
-                    layoutParams = LinearLayout.LayoutParams(-2, dp(42)).apply { leftMargin = dp(3) }
-                })
-                if (pendingThemeName != null) line.addView(actionButton("Icon") { chooseTargetApp(file) }.apply {
+            card.addView(top)
+            attribution?.let { record ->
+                card.addView(TextView(this).apply {
+                    text = "Source: ${record.sourceUrl}"
                     textSize = 9f
-                    layoutParams = LinearLayout.LayoutParams(-2, dp(42)).apply { leftMargin = dp(3) }
+                    setTextColor(UiTheme.textMuted)
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setPadding(dp(2), dp(5), dp(2), 0)
                 })
-            } else if (canApply) line.addView(actionButton("Apply") {
-                manager.applyIconPack(file.name).onFailure { Toast.makeText(this, it.message, Toast.LENGTH_SHORT).show() }
-                render()
-            })
-            if (title == "Images" && pendingThemeName != null) line.addView(actionButton("Icon") { chooseTargetApp(file) }.apply {
-                textSize = 9f
-                layoutParams = LinearLayout.LayoutParams(-2, dp(42)).apply { leftMargin = dp(3) }
-            })
-            line.addView(actionButton("Delete") {
+            }
+            val actions = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+            fun action(label: String, click: () -> Unit) {
+                actions.addView(actionButton(label, click), LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+                    leftMargin = dp(2); rightMargin = dp(2)
+                })
+            }
+            if (canApply && title == "Wallpapers") {
+                action("Use here") { useWallpaper(file) }
+                action("Device") { confirmDeviceWallpaper(file) }
+                if (pendingThemeName != null) action("Theme icon") { chooseTargetApp(file) }
+            } else if (canApply) {
+                action("Apply") {
+                    manager.applyIconPack(file.name).onFailure { Toast.makeText(this, it.message, Toast.LENGTH_SHORT).show() }
+                    render()
+                }
+            } else if (title == "Images" && pendingThemeName != null) {
+                action("Theme icon") { chooseTargetApp(file) }
+            }
+            action("Delete") {
                 AlertDialog.Builder(this@AssetsActivity)
                     .setTitle("Delete ${file.name}?")
                     .setMessage("This removes the local asset from this launcher's private library.")
@@ -700,8 +778,9 @@ class AssetsActivity : Activity() {
                         if (!ok) Toast.makeText(this@AssetsActivity, "Delete failed", Toast.LENGTH_SHORT).show()
                         render()
                     }.show()
-            }.apply { layoutParams = LinearLayout.LayoutParams(-2, dp(42)).apply { leftMargin = dp(3) } })
-            list.addView(line)
+            }
+            card.addView(actions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+            list.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(6) })
         }
     }
 

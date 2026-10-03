@@ -1,5 +1,10 @@
 <resources>
-    <style name="Theme.AIControlLauncher" parent="android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:fontFamily">sans</item><item name="android:statusBarColor">#101218</item><item name="android:navigationBarColor">#101218</item><item name="android:colorAccent">#7C5CFF</item>
+    <style name="Theme.AIControlLauncher" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#BBC8FF</item>
+        <item name="android:statusBarColor">#101319</item>
+        <item name="android:navigationBarColor">#101319</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowActionModeOverlay">true</item>
     </style>
 </resources>

@@ -1,41 +1,48 @@
-# AI Control Launcher — implementation handoff
+# AI Control Launcher — UI overhaul handoff
 
 ## Baseline and delivery boundary
 
-This implementation is based on repository commit `f22eacedc808fc198e2b9d3ae3b94b5fea30401a` (`f22eace`). The change is a local patch for the coordinator to review/apply. **It has not been committed, pushed, or submitted as a pull request.** The GitHub Actions workflow is unchanged.
+This patch is based on `dccb48e60a4178c40afd36c96315d34e5e4bcb22` (`dccb48e`), verified against the repository’s current `main`. Work is on local branch `ui-overhaul-dccb48e`. It has **not** been committed, pushed, or submitted as a pull request. No new UI framework or runtime dependency was added, and the GitHub Actions workflow remains unchanged.
 
-## Product work completed
+## Visual redesign
 
-- **Launcher UI:** retained the native launcher home, three swipeable/persistent pages, dock, app drawer, shortcuts, per-app menus, installed Android widgets, settings, and the nine-preset gallery. Custom theme bundle details are rendered in the gallery/preview rather than only showing a palette.
-- **Conversational assistant:** preserved Gemini/OpenRouter setup and role-structured conversation history, local thread persistence, typed action validation, inline errors, and review cards. If a model returns a palette-only custom-theme plan, an explicit **Build full theme bundle** button is available as a fallback; users can instead save it as a draft or apply its palette directly.
-- **One-pass theme builder:** after the user confirms the AI plan, the app builds a custom theme draft with validated colors, layout/style, wallpaper, and suitable generic app-icon mappings. One final complete-bundle preview shows the image, mappings, and attribution; **Apply complete theme** is separate from building. The automated path has no per-image approval prompts.
-- **Wallpaper discovery:** searches the free Wikimedia Commons API with bounded query fallbacks. It enforces the reuse-license policy, safe title restrictions, dimensions/aspect/pixel bounds, exact Commons HTTPS image-host/path allowlisting, MIME/decode validation, 10 MB download cap, cancellable progress, and preserved creator/license/source attribution. A live 2026-10-03 check showed Commons currently returns `thumb.wikimedia.org` URLs; both that host and `upload.wikimedia.org` are allowlisted only for `/wikipedia/commons/` paths. A real Commons thumbnail downloaded successfully as `image/jpeg` (399,991 bytes).
-- **App icons:** reads OpenMoji's public catalog and statically matches generic symbols to installed app labels locally. Icon PNGs are downloaded only from the official OpenMoji repository, validated, and retain CC BY-SA 4.0 credits. Theme-specific icon files apply consistently in the home grid, dock, and app drawer. Preview/save/apply remain distinct.
-- **Optional local assets:** there is no background Downloads scan. The SAF picker imports up to six explicitly chosen JPEG/PNG/WebP files (10 MB each). Palette/image-shape and filename relevance are evaluated on-device; ambiguous selections remain user-selectable. Local image content or filenames are not uploaded.
-- **Installed themes and widgets:** installed Nova/ADW-compatible icon packages are queried and their documented `appfilter.xml` component/resource mappings resolved from package resources. Plans are restricted to installed packs, with official Google Play search as the installation route; no arbitrary APK sideloading or `.novabackup` restoration is claimed. Widgets use installed Android widget providers and remain separate from theme images.
+The native Kotlin/Android app now uses a quieter, theme-aware launcher palette, restrained typography, grouped surfaces, compact spacing and palette-aware foreground contrast. Home is reorganized around a date/clock, app search, pinned shortcuts/widgets, page indicators, and a persistent dock with an explicit **Apps** entry; separate labelled home controls open **Themes**, **Assets**, **Assistant**, and **Settings**. The three workspace pages remain swipeable, and page indicators now have larger touch areas.
 
-A request such as “make a Spider-Man theme” is represented as an abstract red/blue/web visual theme. This implementation does **not** bundle Spider-Man, Marvel, or other copyrighted character artwork unless a particular asset is genuinely licensed for reuse.
+The app drawer, launcher settings, AI provider settings, preset theme gallery, dedicated AI chat, and wallpaper/asset library have been reshaped to reduce oversized form-like headings and dense control walls. Settings are grouped by task; theme cards show miniature launcher/color previews and optional wallpaper art; asset entries show image thumbnails with concise creator/license metadata and separated actions; the AI composer remains multiline and compact. Native system dialogs and controls use a dark-compatible theme, and primary/user-bubble text colors adapt to the active palette.
 
-## Verification
+## Behavior retained
+
+The UI work leaves the existing native feature paths in place: three-page swipe navigation, home shortcuts, app drawer/search/sorting, dock, app menus, installed Android widget picker/hosting, preset and custom theme preview/apply/undo, icon-pack management, persistent assistant history, validated AI plan review/confirm, and wallpaper search/download/preview/apply. Asset attribution, local asset selection, and existing provider/launcher preferences continue through their original stores and managers. No Flutter rewrite was made: Android launcher, widgets, and icon-pack surfaces continue to use the existing native implementation.
+
+## Compatibility constraints
+
+These files were verified unchanged from the baseline: `app/build.gradle.kts`, `app/src/main/AndroidManifest.xml`, `app/src/main/cpp/CMakeLists.txt`, and `.github/workflows/build-apk.yml`. The project remains **minSdk 30 / targetSdk 30 / maxSdkVersion 30**, with the **`armeabi-v7a`-only** ABI filter and native API-30 platform target. No Java/API surface above API 30 was intentionally introduced without guards, and no device/emulator run is claimed.
+
+## Verification status for this patch
 
 | Check | Result |
 |---|---|
-| JVM unit tests | `:app:testDebugUnitTest` — **51 passed, 0 failed, 0 errors** |
-| Android lint | `:app:lintDebug` succeeded — **0 errors, 43 warnings** (37 `SetTextI18n`, 2 `GradleDependency`, 2 dynamic-resource `DiscouragedApi`, 1 `UseCompatLoadingForDrawables`, and 1 intentional single-ABI `ChromeOsAbiSupport`) |
-| Debug/release assembly | `:app:assembleDebug` and `:app:assembleRelease` both succeeded |
-| Manifest in both APKs | `minSdk=30`, `targetSdk=30`, `maxSdkVersion=30` |
-| Native ABI | Both contain only `lib/armeabi-v7a/liblauncherabi.so`; inspected ELF is 32-bit ARM |
-| APK signatures | Both APKs pass `apksigner verify` (v2 signature; one signer) |
-| Source hygiene | `git diff --check` clean; `.github/workflows/build-apk.yml` unchanged |
-| Live public asset smoke test | OpenMoji catalog/PNG and Commons search/image download returned usable responses with license and dimension metadata |
+| Baseline | `HEAD` is `dccb48e60a4178c40afd36c96315d34e5e4bcb22`; remote `main` matched when checked. |
+| Source whitespace | `git diff --check` passed. |
+| Compatibility files | Confirmed unchanged from `dccb48e`. |
+| Feature-presence review | Static source markers for navigation, widgets, AI review/confirmation, theme, wallpaper, and icon-pack paths were present. This is not a runtime test. |
+| JVM unit tests | `:app:testDebugUnitTest` — **52 passed, 0 failed, 0 errors, 0 skipped**. |
+| Android lint | `:app:lintDebug` succeeded — **0 errors, 44 warnings** (38 `SetTextI18n`, 2 `GradleDependency`, 2 `DiscouragedApi`, 1 `UseCompatLoadingForDrawables`, and 1 intentional single-ABI `ChromeOsAbiSupport`). |
+| Debug/release assembly | `:app:assembleDebug` and `:app:assembleRelease` both succeeded; fresh APKs were built. |
+| Merged APK manifests | Both APKs report `minSdk=30`, `targetSdk=30`, and `maxSdkVersion=30`. |
+| Native ABI | Both APKs contain only `lib/armeabi-v7a/liblauncherabi.so`; ELF inspection reports ELF32 / ARM. |
+| APK signatures | Both APKs pass `apksigner verify`; each has one signer and verifies with APK Signature Scheme v2. The repository release variant is debug-signed, not production-signed. |
+| SDK/license setup | The approved SDK/API 35, Build Tools 35.0.0, NDK 27.0.12077973, and CMake 3.31.6 packages were installed; Google SDK/NDK license prompts were accepted under the user’s authorization. |
+| Physical device/emulator | Not tested; no device/emulator claims are made. |
 
-The native-build warning that 32-bit-only apps omit 64-bit support is expected and retained because the requested product constraint is ARMv7a only. Lint warnings are warnings, not ignored errors: English strings are assembled in programmatic UI, installed icon packs require dynamic resource lookup, and dependency/ChromeOS advisories remain.
+**Patch correction during verification:** The supplied patch initially contained Kotlin compile errors. The final local patch includes small build fixes in `SettingsActivity.kt` (action-row syntax/layout and explicit single-line setter), `MainActivity.kt` (explicit sample-view background setters), and `ThemeGalleryActivity.kt` (the `View` import and explicit view setters). These corrections are included in the baseline-relative delivery patch; no unrelated files or build settings were changed.
 
-The latest upstream Actions run checked before patching failed at the existing manifest-verification step because its API 28/35 expectations conflict with the required API-30-only manifest. That workflow is intentionally unchanged; this local patch was not pushed, so no CI result for this patch is claimed.
+`git diff --check` passes. `.github/workflows/build-apk.yml` remains unchanged. No CI result is claimed for this local patch.
 
-## Remaining limitations
+## Current upstream Actions result (workflow unchanged)
 
-- No physical-device or emulator runtime test was possible in this sandbox.
-- The release APK is signed with the repository's debug signing configuration; configure a private release keystore before distribution.
-- Local inspection is opt-in and limited to files the user explicitly selects; the AI provider does not receive local image content.
-- The app intentionally excludes Android versions outside API 30 and devices lacking 32-bit ARMv7a support.
+The latest public run for the baseline `dccb48e` is [run 37120453044](https://github.com/richardbrownmiami-commits/AI-Control-Launcher-Phase1/actions/runs/37120453044), completed with **failure**. Its debug APK build step succeeded, then **Verify debug APK Android 9–15** failed at the existing manifest assertion. The workflow expects `sdkVersion:'28'` and `targetSdkVersion:'35'`, which conflict with the required API-30 manifest; ARM verification, artifact upload, and the release build were consequently skipped. The workflow was not edited. There is no CI result for this local patch because it has not been pushed.
+
+## Distribution notes
+
+Before distribution, configure a private release keystore; repository release signing is not a production-signing claim. This patch does not change the platform/API or ARMv7a restrictions above.
