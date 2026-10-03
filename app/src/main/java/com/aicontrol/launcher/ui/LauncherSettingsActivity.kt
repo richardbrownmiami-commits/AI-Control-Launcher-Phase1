@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.os.Bundle
 import android.view.Gravity
+import android.view.View
 import android.widget.*
 import com.aicontrol.launcher.actions.ActionEngine
 import com.aicontrol.launcher.icons.IconPackManager
@@ -29,6 +30,7 @@ class LauncherSettingsActivity : Activity() {
     private lateinit var dockVisible: CheckBox
     private lateinit var drawerSearch: CheckBox
     private lateinit var drawerLabels: CheckBox
+    private val categoryTargets = linkedMapOf<String, Int>()
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     override fun onCreate(state: Bundle?) {
@@ -89,7 +91,7 @@ class LauncherSettingsActivity : Activity() {
         themeSpinner = spinner(themes, themes.firstOrNull { it.equals(engine.theme(), true) } ?: themes.first())
         styleSpinner = spinner(listOf("glass", "flat", "neon"), engine.style())
         layoutSpinner = spinner(listOf("grid", "compact", "dense", "wide"), engine.layout())
-        content.addView(sectionCard("Appearance", "Theme, wallpaper, and visual style").apply {
+        content.addView(sectionCard("Appearance", "Theme, wallpaper, and visual style", "◈").apply {
             addView(row("Active theme", themeSpinner))
             addView(row("Card style", styleSpinner))
             addView(actionButton("Browse theme gallery") {
@@ -104,7 +106,7 @@ class LauncherSettingsActivity : Activity() {
         columnsSpinner = spinner((3..7).toList(), engine.homeColumns())
         iconSizeSpinner = spinner(listOf(36, 44, 48, 56, 64, 72), engine.iconSize())
         labels = checkbox("Show app names under icons", engine.showLabels())
-        content.addView(sectionCard("Home screen", "Choose how apps fit on each page").apply {
+        content.addView(sectionCard("Home screen", "Choose how apps fit on each page", "⌂").apply {
             addView(row("Rows per page", rowsSpinner, "rows"))
             addView(row("Columns per page", columnsSpinner, "columns"))
             addView(row("Shortcut icon size", iconSizeSpinner, "dp"))
@@ -114,7 +116,7 @@ class LauncherSettingsActivity : Activity() {
 
         dockCountSpinner = spinner((3..6).toList(), engine.dockCount())
         dockVisible = checkbox("Show the dock", engine.dockVisible())
-        content.addView(sectionCard("Dock", "Quick access to your most-used apps").apply {
+        content.addView(sectionCard("Dock", "Quick access to your most-used apps", "▤").apply {
             addView(row("App shortcut slots", dockCountSpinner))
             addView(dockVisible)
         })
@@ -123,7 +125,7 @@ class LauncherSettingsActivity : Activity() {
         sortSpinner = spinner(listOf("A–Z", "Z–A", "Package"), engine.drawerSort())
         drawerSearch = checkbox("Show search in the app drawer", engine.drawerSearchVisible())
         drawerLabels = checkbox("Show app names in the drawer", engine.drawerLabels())
-        content.addView(sectionCard("App drawer", "Find and launch installed apps").apply {
+        content.addView(sectionCard("App drawer", "Find and launch installed apps", "▦").apply {
             addView(row("Start on page", pageSpinner))
             addView(row("App sorting", sortSpinner))
             addView(drawerSearch)
@@ -133,7 +135,7 @@ class LauncherSettingsActivity : Activity() {
         val installed = listOf(InstalledIconPackItem("", "System icons")) +
             packManager.installedPacks().map { InstalledIconPackItem(it.packageName, it.label) }
         packSpinner = spinner(installed.map { it.label }, installed.firstOrNull { it.packageName == engine.installedIconPack() }?.label ?: installed.first().label)
-        content.addView(sectionCard("Icon packs", "Use compatible packs already installed on Android").apply {
+        content.addView(sectionCard("Icon packs", "Use compatible packs already installed on Android", "✦").apply {
             addView(row("Active icon pack", packSpinner))
             addView(TextView(this@LauncherSettingsActivity).apply {
                 text = "Nova/ADW-compatible appfilter mappings are supported. Private backup formats and APK installation are not used."
@@ -148,12 +150,39 @@ class LauncherSettingsActivity : Activity() {
             })
         })
 
-        content.addView(sectionCard("Assistant", "AI is optional; offline theme tools remain available").apply {
+        content.addView(sectionCard("Assistant", "AI is optional; offline theme tools remain available", "✧").apply {
             addView(actionButton("AI provider settings") {
                 startActivity(Intent(this@LauncherSettingsActivity, SettingsActivity::class.java))
             })
         })
         scroll.addView(content)
+        val categoryBar = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+            setPadding(dp(12), dp(6), dp(12), dp(8))
+        }
+        categoryBar.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            listOf("Appearance", "Home screen", "Dock", "App drawer", "Icon packs", "Assistant").forEach { label ->
+                addView(Button(this@LauncherSettingsActivity).apply {
+                    text = label
+                    textSize = 11f
+                    isAllCaps = false
+                    minWidth = 0
+                    minHeight = 0
+                    setPadding(dp(12), 0, dp(12), 0)
+                    setTextColor(UiTheme.textPrimary)
+                    background = UiTheme.rounded(UiTheme.card2, 16f)
+                    contentDescription = "Jump to $label settings"
+                    setOnClickListener {
+                        val targetId = categoryTargets[label] ?: return@setOnClickListener
+                        val target = findViewById<View>(targetId)
+                        scroll.post { scroll.smoothScrollTo(0, target.top) }
+                    }
+                }, LinearLayout.LayoutParams(-2, dp(44)).apply { rightMargin = dp(6) })
+            }
+        })
+        root.addView(categoryBar, LinearLayout.LayoutParams(-1, dp(56)))
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(Button(this).apply {
             text = "Save changes"
@@ -167,22 +196,38 @@ class LauncherSettingsActivity : Activity() {
         setContentView(root)
     }
 
-    private fun sectionCard(title: String, subtitle: String) = LinearLayout(this).apply {
+    private fun sectionCard(title: String, subtitle: String, glyph: String) = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(13), dp(12), dp(13), dp(12))
+        setPadding(dp(14), dp(14), dp(14), dp(13))
         UiTheme.styleCard(this, UiTheme.card, false)
-        addView(TextView(this@LauncherSettingsActivity).apply {
-            text = title
-            textSize = 15f
-            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-            setTextColor(UiTheme.textPrimary)
-        })
-        addView(TextView(this@LauncherSettingsActivity).apply {
-            text = subtitle
-            textSize = 11f
-            setTextColor(UiTheme.textMuted)
-            setPadding(0, dp(2), 0, dp(7))
-        })
+        id = View.generateViewId()
+        categoryTargets[title] = id
+        val heading = LinearLayout(this@LauncherSettingsActivity).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(this@LauncherSettingsActivity).apply {
+                text = glyph
+                textSize = 18f
+                gravity = Gravity.CENTER
+                setTextColor(UiTheme.accent)
+                background = UiTheme.rounded(UiTheme.card2, 13f)
+            }, LinearLayout.LayoutParams(dp(38), dp(38)).apply { rightMargin = dp(11) })
+            addView(LinearLayout(this@LauncherSettingsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(TextView(this@LauncherSettingsActivity).apply {
+                    text = title
+                    textSize = 15f
+                    typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                    setTextColor(UiTheme.textPrimary)
+                })
+                addView(TextView(this@LauncherSettingsActivity).apply {
+                    text = subtitle
+                    textSize = 11f
+                    setTextColor(UiTheme.textMuted)
+                    maxLines = 2
+                })
+            })
+        }
+        addView(heading, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(9) }
     }
 

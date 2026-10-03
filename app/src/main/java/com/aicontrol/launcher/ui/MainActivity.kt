@@ -142,45 +142,50 @@ class MainActivity : Activity() {
         }
         root.addView(content, FrameLayout.LayoutParams(-1, -1))
 
-        val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        top.addView(TextView(this).apply {
-            text = "Launcher"
-            textSize = 16f
-            typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-            setTextColor(UiTheme.textPrimary)
-            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
-        })
-        fun navAction(glyph: String, label: String, description: String, action: () -> Unit) = LinearLayout(this).apply {
+        val top = LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), 0, 0, 0)
+        }
+        val brandMark = FrameLayout(this).apply {
+            background = UiTheme.rounded(UiTheme.accent, 14f)
+            addView(TextView(this@MainActivity).apply {
+                text = "A"
+                textSize = 18f
+                typeface = android.graphics.Typeface.create("sans-serif-black", android.graphics.Typeface.NORMAL)
+                gravity = Gravity.CENTER
+                setTextColor(UiTheme.contrasting(UiTheme.accent))
+            }, FrameLayout.LayoutParams(-1, -1))
+            contentDescription = "AI Control Launcher"
+        }
+        top.addView(brandMark, LinearLayout.LayoutParams(dp(38), dp(38)).apply { rightMargin = dp(10) })
+        top.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            isClickable = true
-            isFocusable = true
-            contentDescription = description
-            background = UiTheme.rounded(UiTheme.card2, 15f)
             addView(TextView(this@MainActivity).apply {
-                text = glyph
+                text = "AI Control"
                 textSize = 15f
-                gravity = Gravity.CENTER
-                setTextColor(UiTheme.accent)
-            }, LinearLayout.LayoutParams(-1, dp(22)))
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                setTextColor(UiTheme.textPrimary)
+            })
             addView(TextView(this@MainActivity).apply {
-                text = label
+                text = "YOUR HOME SPACE"
                 textSize = 9f
-                gravity = Gravity.CENTER
+                letterSpacing = 0.09f
                 setTextColor(UiTheme.textMuted)
-                maxLines = 1
-            }, LinearLayout.LayoutParams(-1, dp(16)))
-            setOnClickListener { action() }
+            })
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        val toolsButton = Button(this).apply {
+            text = "⋮"
+            textSize = 22f
+            minWidth = 0
+            minHeight = 0
+            isAllCaps = false
+            setTextColor(UiTheme.textPrimary)
+            background = UiTheme.rounded(UiTheme.card2, 16f)
+            contentDescription = "Open launcher tools: assistant, themes, wallpapers, and settings"
+            setOnClickListener { showLauncherMenu(this) }
         }
-        listOf(
-            Triple("◈", "Themes", "Open themes") to { startActivity(Intent(this, ThemeGalleryActivity::class.java)) },
-            Triple("▧", "Assets", "Open wallpaper and asset library") to { startActivity(Intent(this, AssetsActivity::class.java)) },
-            Triple("✦", "Assistant", "Open persistent AI assistant chat") to { startActivity(Intent(this, AssistantActivity::class.java)) },
-            Triple("⚙", "Settings", "Open launcher settings") to { startActivity(Intent(this, LauncherSettingsActivity::class.java)) }
-        ).forEach { (nav, action) ->
-            top.addView(navAction(nav.first, nav.second, nav.third, action), LinearLayout.LayoutParams(dp(50), dp(48)).apply { leftMargin = dp(4) })
-        }
-        content.addView(top, LinearLayout.LayoutParams(-1, dp(52)))
+        top.addView(toolsButton, LinearLayout.LayoutParams(dp(48), dp(48)))
+        content.addView(top, LinearLayout.LayoutParams(-1, dp(54)))
 
         val pageHeader = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         pageTitle = TextView(this).apply {
@@ -266,10 +271,8 @@ class MainActivity : Activity() {
                 setTextColor(UiTheme.textMuted)
             })
         })
-        drawerTop.addView(smallControl("Home", 54) { hideDrawer() })
-        drawerTop.addView(smallControl("Themes", 58) { startActivity(Intent(this, ThemeGalleryActivity::class.java)) })
-        drawerTop.addView(smallControl("⚙", 42) { startActivity(Intent(this, LauncherSettingsActivity::class.java)) }.apply {
-            contentDescription = "Open launcher settings"
+        drawerTop.addView(smallControl("Home", 58) { hideDrawer() }.apply {
+            contentDescription = "Close app drawer and return to home"
         })
         drawerOverlay.addView(drawerTop, LinearLayout.LayoutParams(-1, dp(52)))
 
@@ -354,58 +357,38 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(8), dp(3), dp(8), dp(14))
             }
-            hero.addView(TextView(this).apply {
-                text = java.text.SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()).format(java.util.Date())
+            hero.addView(android.widget.TextClock(this).apply {
+                format12Hour = "EEEE  ·  MMMM d"
+                format24Hour = "EEEE  ·  MMMM d"
                 textSize = 13f
                 typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
-                setTextColor(UiTheme.textMuted)
+                setTextColor(UiTheme.textPrimary)
+                alpha = 0.82f
+                letterSpacing = 0.02f
+                contentDescription = "Today's date"
             })
             hero.addView(android.widget.TextClock(this).apply {
                 format12Hour = "h:mm"
                 format24Hour = "HH:mm"
-                textSize = 48f
+                textSize = 62f
                 typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
                 setTextColor(UiTheme.textPrimary)
                 contentDescription = "Current time"
                 includeFontPadding = false
-            }, LinearLayout.LayoutParams(-1, dp(58)))
-            body.addView(hero, LinearLayout.LayoutParams(-1, -2))
-
-            val search = LinearLayout(this).apply {
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(15), 0, dp(7), 0)
-                background = UiTheme.rounded(UiTheme.card, 25f)
-                isClickable = true
-                isFocusable = true
-                contentDescription = "Search installed apps"
-                setOnClickListener { showDrawer(); drawerSearch.requestFocus() }
-                addView(TextView(this@MainActivity).apply {
-                    text = "⌕"
-                    textSize = 22f
-                    setTextColor(UiTheme.accent)
-                }, LinearLayout.LayoutParams(dp(32), -2))
-                addView(TextView(this@MainActivity).apply {
-                    text = "Search your apps"
-                    textSize = 14f
-                    setTextColor(UiTheme.textMuted)
-                    layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
-                })
-                addView(TextView(this@MainActivity).apply {
-                    text = "›"
-                    textSize = 21f
-                    gravity = Gravity.CENTER
-                    setTextColor(UiTheme.textMuted)
-                }, LinearLayout.LayoutParams(dp(32), -1))
-            }
-            body.addView(search, LinearLayout.LayoutParams(-1, dp(50)).apply { bottomMargin = dp(12) })
+            }, LinearLayout.LayoutParams(-1, dp(70)))
+            body.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
         }
 
         body.addView(TextView(this).apply {
-            text = if (page == 1) "Favourites" else if (page == 0) "Left page" else "Right page"
-            textSize = 14f
+            text = when (page) {
+                1 -> "Favourites"
+                0 -> "Left page"
+                else -> "Right page"
+            }
+            textSize = 15f
             typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
             setTextColor(UiTheme.textPrimary)
-            setPadding(dp(5), dp(7), 0, dp(5))
+            setPadding(dp(5), dp(9), 0, dp(7))
         })
         val shortcuts = GridLayout(this).apply {
             columnCount = engine.homeColumns()
@@ -418,7 +401,7 @@ class MainActivity : Activity() {
         pageWidgetContainers += widgets
         body.addView(widgets, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
         body.addView(TextView(this).apply {
-            text = if (page == 1) "Touch and hold an app in Apps to pin it here." else "Swipe to another page, or add a widget above."
+            text = if (page == 1) "Touch and hold an app in Apps to pin it here." else "Swipe between pages · add apps or widgets from this space."
             textSize = 11f
             typeface = UiTheme.font()
             setTextColor(UiTheme.textMuted)
@@ -440,6 +423,26 @@ class MainActivity : Activity() {
         background = UiTheme.rounded(UiTheme.card2, 16f)
         setOnClickListener { action() }
         layoutParams = LinearLayout.LayoutParams(dp(width), dp(44)).apply { leftMargin = dp(3); rightMargin = dp(2) }
+    }
+
+    private fun showLauncherMenu(anchor: View) {
+        PopupMenu(this, anchor).apply {
+            menu.add(0, 1, 0, "AI assistant")
+            menu.add(0, 2, 1, "Theme gallery")
+            menu.add(0, 3, 2, "Wallpapers & assets")
+            menu.add(0, 4, 3, "Launcher settings")
+            setOnMenuItemClickListener { item ->
+                val target = when (item.itemId) {
+                    1 -> AssistantActivity::class.java
+                    2 -> ThemeGalleryActivity::class.java
+                    3 -> AssetsActivity::class.java
+                    4 -> LauncherSettingsActivity::class.java
+                    else -> return@setOnMenuItemClickListener false
+                }
+                startActivity(Intent(this@MainActivity, target))
+                true
+            }
+        }.show()
     }
 
     private fun smallControlWithView(label: String, width: Int, action: (View) -> Unit): Button = Button(this).apply {

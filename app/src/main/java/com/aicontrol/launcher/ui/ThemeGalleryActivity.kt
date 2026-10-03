@@ -107,14 +107,21 @@ class ThemeGalleryActivity : Activity() {
         list.removeAllViews()
         val names = (ThemeSpec.builtInNames + engine.availableThemes()).distinctBy { it.lowercase() }
         list.addView(TextView(this).apply {
-            text = "READY-MADE THEMES  ·  ${ThemeSpec.builtInNames.size} PRESETS"
+            text = "EXPLORE  ·  ${ThemeSpec.builtInNames.size} ORIGINAL PRESETS"
             textSize = 10f
             typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
             setTextColor(UiTheme.textMuted)
             letterSpacing = 0.06f
             setPadding(dp(3), dp(13), 0, dp(8))
         })
-        names.forEach { name ->
+        val screenWidthDp = resources.displayMetrics.widthPixels / resources.displayMetrics.density
+        val columns = if (screenWidthDp >= 380f && resources.configuration.fontScale < 1.25f) 2 else 1
+        var galleryRow: LinearLayout? = null
+        names.forEachIndexed { index, name ->
+            if (index % columns == 0) {
+                galleryRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                list.addView(galleryRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(3) })
+            }
             val values = engine.themeValues(name)
             val themeBg = Color.parseColor(values.background)
             val themeAccent = Color.parseColor(values.accent)
@@ -133,6 +140,8 @@ class ThemeGalleryActivity : Activity() {
                 textSize = 15f
                 typeface = fontFor(values.typography)
                 setTextColor(UiTheme.textPrimary)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
                 layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
             })
             if (isActive) heading.addView(TextView(this).apply {
@@ -147,13 +156,13 @@ class ThemeGalleryActivity : Activity() {
 
             val preview = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(11), dp(10), dp(11), dp(10))
+                setPadding(dp(8), dp(8), dp(8), dp(8))
                 background = UiTheme.rounded(themeBg, 17f)
             }
             val sampleTop = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
             sampleTop.addView(TextView(this@ThemeGalleryActivity).apply {
                 text = "9:41"
-                textSize = 18f
+                textSize = 16f
                 typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
                 setTextColor(contrast(values.background))
             }, LinearLayout.LayoutParams(0, -2, 1f))
@@ -171,24 +180,24 @@ class ThemeGalleryActivity : Activity() {
                 contentDescription = "${name} wallpaper preview"
                 clipToOutline = true
                 background = UiTheme.rounded(themeCard, 12f)
-            }, LinearLayout.LayoutParams(-1, dp(72)).apply { topMargin = dp(5) })
+            }, LinearLayout.LayoutParams(-1, dp(62)).apply { topMargin = dp(5) })
             val sample = LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(7), dp(7), dp(7), dp(7))
+                setPadding(dp(5), dp(5), dp(5), dp(5))
                 background = UiTheme.rounded(themeCard, 14f)
             }
-            listOf("●", "●", "●", "●").forEachIndexed { index, dot ->
+            listOf("•", "•", "•").forEachIndexed { index, dot ->
                 sample.addView(TextView(this@ThemeGalleryActivity).apply {
                     text = dot
-                    textSize = 15f
+                    textSize = 12f
                     gravity = Gravity.CENTER
-                    background = UiTheme.rounded(if (index % 2 == 0) themeAccent else themeAccent2, 14f)
+                    background = UiTheme.rounded(if (index % 2 == 0) themeAccent else themeAccent2, 12f)
                     setTextColor(contrast(if (index % 2 == 0) values.accent else values.accent2))
-                }, LinearLayout.LayoutParams(dp(30), dp(30)).apply { rightMargin = dp(7) })
+                }, LinearLayout.LayoutParams(dp(23), dp(23)).apply { rightMargin = dp(4) })
             }
             sample.addView(TextView(this@ThemeGalleryActivity).apply {
-                text = "Apps     Home     Dock"
-                textSize = 10f
+                text = "Apps · Dock"
+                textSize = 9f
                 setTextColor(contrast(values.card))
             })
             preview.addView(sample, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
@@ -209,23 +218,24 @@ class ThemeGalleryActivity : Activity() {
             card.addView(TextView(this).apply {
                 text = "${values.layout.replaceFirstChar { it.uppercase() }} layout · ${values.iconStyle} icons · ${values.iconAssets.size} custom app icons" +
                     (if (values.iconPackPackage != null) " · installed pack" else "")
-                textSize = 10f
+                textSize = 9f
                 typeface = fontFor(values.typography)
                 setTextColor(UiTheme.textMuted)
-                setPadding(dp(2), dp(2), dp(2), dp(7))
+                maxLines = 2
+                setPadding(dp(2), dp(2), dp(2), dp(5))
             })
-            val actions = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+            val actions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             actions.addView(Button(this).apply {
-                text = "Preview & apply"
-                textSize = 12f
+                text = "Preview"
+                textSize = 11f
                 isAllCaps = false
                 setTextColor(contrast(values.accent))
                 background = UiTheme.rounded(themeAccent, 15f)
                 setOnClickListener { previewTheme(values) }
-            }, LinearLayout.LayoutParams(0, dp(48), 1f))
+            }, LinearLayout.LayoutParams(-1, dp(44)))
             if (engine.isCustomTheme(name)) actions.addView(Button(this).apply {
                 text = "Edit assets"
-                textSize = 11f
+                textSize = 10f
                 isAllCaps = false
                 setTextColor(UiTheme.textPrimary)
                 background = UiTheme.rounded(UiTheme.card2, 15f)
@@ -233,9 +243,19 @@ class ThemeGalleryActivity : Activity() {
                     startActivity(android.content.Intent(this@ThemeGalleryActivity, AssetsActivity::class.java)
                         .putExtra(AssetsActivity.EXTRA_THEME_NAME, name))
                 }
-            }, LinearLayout.LayoutParams(dp(92), dp(48)).apply { leftMargin = dp(7) })
+            }, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(5) })
             card.addView(actions)
-            list.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(9) })
+            galleryRow?.addView(card, LinearLayout.LayoutParams(0, -2, 1f).apply {
+                leftMargin = dp(4)
+                rightMargin = dp(4)
+                bottomMargin = dp(7)
+            })
+            if (columns == 2 && index == names.lastIndex && index % columns == 0) {
+                galleryRow?.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f).apply {
+                    leftMargin = dp(4)
+                    rightMargin = dp(4)
+                })
+            }
         }
     }
 

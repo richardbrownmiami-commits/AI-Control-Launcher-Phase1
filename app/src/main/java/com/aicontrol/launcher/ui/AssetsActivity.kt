@@ -703,8 +703,18 @@ class AssetsActivity : Activity() {
                 "Images" -> catalog.imageAttribution(file.name)
                 else -> null
             }
+            if (title == "Wallpapers") {
+                val bitmap = ImageAssetValidation.decodeSampled(file, 1200)
+                if (bitmap != null) card.addView(ImageView(this).apply {
+                    setImageBitmap(bitmap)
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    contentDescription = "Wallpaper preview of ${file.name}"
+                    clipToOutline = true
+                    background = UiTheme.rounded(UiTheme.card2, 16f)
+                }, LinearLayout.LayoutParams(-1, dp(148)).apply { bottomMargin = dp(9) })
+            }
             val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-            if (title in setOf("Wallpapers", "Images", "Icon overrides")) {
+            if (title in setOf("Images", "Icon overrides")) {
                 val bitmap = ImageAssetValidation.decodeSampled(file, 128)
                 if (bitmap != null) top.addView(ImageView(this).apply {
                     setImageBitmap(bitmap)
@@ -718,7 +728,7 @@ class AssetsActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
                 addView(TextView(this@AssetsActivity).apply {
                     text = file.name
-                    textSize = 12f
+                    textSize = if (title == "Wallpapers") 14f else 12f
                     typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
                     setTextColor(UiTheme.textPrimary)
                     maxLines = 1
