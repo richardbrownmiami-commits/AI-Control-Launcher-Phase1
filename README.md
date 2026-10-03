@@ -5,6 +5,7 @@ An Android HOME launcher prototype targeted strictly at Android 11 / API 30 and 
 ## Launcher experience
 
 - **Three swipeable home pages:** left, main, and right workspace pages. The selected page persists. Page shortcuts are independently stored, can be moved between pages, moved earlier/later in their grid, or removed. Shortcut capacity follows the configured row/column grid.
+- **Launcher-style home surface:** live clock/date card, app-library search entry, assistant shortcut, tactile animated page indicator, animated left/right swipe transitions, dock, and fixed app-drawer control.
 - **App drawer:** a distinct Apps button opens a searchable, sortable launchable-app grid. Sorting supports A–Z, Z–A, and package name. Long-press an app to launch it, add a home shortcut, add it to the dock, or hide it from this launcher. Package discovery uses the `MAIN`/`LAUNCHER` `<queries>` declaration; the app does not request `QUERY_ALL_PACKAGES`.
 - **Dock:** persisted dock app shortcuts remain separate from home-page shortcuts. Slot count and dock visibility are configurable; the app-drawer button remains available when the dock is hidden.
 - **Installed Android widgets:** uses API 30 `AppWidgetHost`/`AppWidgetManager` picker and provider configuration flow. A widget is assigned to the currently selected home page and can be removed. Widget IDs and page placements persist locally.
@@ -18,10 +19,11 @@ Custom themes created through the existing offline helper or configured AI provi
 
 ## Assistant, wallpapers, and assets
 
-- When an OpenRouter or Gemini provider and key are configured in AI Settings, the prompt field sends the request, a short recent conversation, and limited launcher appearance/theme context to that provider. With no active key, the deterministic offline parser remains available.
+- A dedicated assistant screen maintains a local persistent conversation thread, prompt history, provider/offline status, inline errors, and preview/confirm action cards. OpenRouter receives normal role-separated conversation turns; Gemini retains its turn structure. With no active key, the deterministic offline theme helper remains available and the UI explains how to enable full conversation.
+- The assistant supports selecting a local image or file through Android's Storage Access Framework; selected file contents and names are not uploaded to the AI provider.
 - The assistant supports validated theme operations and bounded layout/style actions, plus confirmed Wikimedia wallpaper searches and the platform widget picker. Each downloadable Commons result still requires a separate user confirmation.
-- Users can select an image through Android's document picker, or search Wikimedia Commons for reusable wallpaper. Only CC0, public-domain, CC BY, and CC BY-SA candidates pass the reuse filter; creator, license, and source are retained and shown. Unknown, NC, and ND licenses are rejected.
-- Applying an image as the launcher's background does not change the Android device wallpaper. The separate device-wallpaper option requires explicit confirmation.
+- Users can select an image through Android's document picker, or search Wikimedia Commons for reusable wallpaper. Only CC0, public-domain, CC BY, and CC BY-SA candidates pass the reuse filter; creator, license, and source are retained and shown. Unknown, NC, and ND licenses are rejected. Downloads use HTTPS, validate the final source host, content type, size, and decoded image, and expose progress/cancellation.
+- A downloaded wallpaper is previewed before confirmation. Setting it as the launcher's background is distinct from the separately confirmed Android device-wallpaper operation; only successful API results are reported as applied.
 - Imported/downloaded assets are stored in app-private `filesDir/launcher-assets/` with MIME, size, and decoded-dimension validation. No third-party APK is installed or modified.
 
 ## Privacy and limitations

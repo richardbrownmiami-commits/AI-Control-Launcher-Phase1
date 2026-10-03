@@ -47,12 +47,15 @@ private const val REQUEST_CONFIGURE_WIDGET = 6302
 
 @SuppressLint("SetTextI18n")
 class MainActivity : Activity() {
+    companion object { const val EXTRA_REQUEST_ADD_WIDGET = "request_add_widget_after_ai_confirmation" }
     private lateinit var apps: AppRepository
     private lateinit var engine: ActionEngine
     private lateinit var assets: LauncherAssetManager
     private lateinit var iconPacks: IconPackManager
     private lateinit var root: FrameLayout
     private lateinit var content: LinearLayout
+    private lateinit var wallpaperImage: ImageView
+    private var wallpaperBitmap: android.graphics.Bitmap? = null
     private lateinit var commandInput: EditText
     private lateinit var dock: LinearLayout
     private lateinit var widgetManager: AppWidgetManager
@@ -65,6 +68,7 @@ class MainActivity : Activity() {
     private lateinit var pageTitle: TextView
     private lateinit var homeShortcutGrid: GridLayout
     private lateinit var appDrawerButton: Button
+    private lateinit var pageIndicator: LinearLayout
     private val homePages = mutableListOf<LinearLayout>()
     private val homeShortcutGrids = mutableListOf<GridLayout>()
     private val pageWidgetContainers = mutableListOf<LinearLayout>()
@@ -111,6 +115,8 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         aiScope.cancel()
+        wallpaperBitmap?.recycle()
+        wallpaperBitmap = null
         super.onDestroy()
     }
 
@@ -118,12 +124,13 @@ class MainActivity : Activity() {
         UiTheme.bind(engine)
         root = FrameLayout(this)
 
-        val wallpaper = ImageView(this).apply {
+        wallpaperImage = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
             background = UiTheme.homeBackground()
-            assets.activeWallpaper()?.let { setImageBitmap(ImageAssetValidation.decodeSampled(it, 2048)) }
+            wallpaperBitmap = assets.activeWallpaper()?.let { ImageAssetValidation.decodeSampled(it, 2048) }
+            setImageBitmap(wallpaperBitmap)
         }
-        root.addView(wallpaper, FrameLayout.LayoutParams(-1, -1))
+        root.addView(wallpaperImage, FrameLayout.LayoutParams(-1, -1))
         val shade = FrameLayout(this).apply {
             setBackgroundColor(Color.argb(72, Color.red(UiTheme.bg), Color.green(UiTheme.bg), Color.blue(UiTheme.bg)))
         }
@@ -137,7 +144,7 @@ class MainActivity : Activity() {
 
         val top = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         top.addView(TextView(this).apply {
-            text = "AI Control Launcher"
+            text = "AI Launcher"
             textSize = 18f
             typeface = UiTheme.font()
             setTextColor(UiTheme.textPrimary)
@@ -154,37 +161,8 @@ class MainActivity : Activity() {
         top.addView(topButton("Themes", 58) { startActivity(Intent(this, ThemeGalleryActivity::class.java)) })
         top.addView(topButton("Settings", 62) { startActivity(Intent(this, LauncherSettingsActivity::class.java)) })
         top.addView(topButton("Apps", 48) { showDrawer() })
+        top.addView(topButton("AI", 40) { startActivity(Intent(this, AssistantActivity::class.java)) })
         content.addView(top, LinearLayout.LayoutParams(-1, dp(44)))
-
-        assistantCaption = TextView(this).apply {
-            textSize = 10f
-            typeface = UiTheme.font()
-            setTextColor(UiTheme.accent)
-            setPadding(dp(3), dp(2), 0, 0)
-        }
-        content.addView(assistantCaption, LinearLayout.LayoutParams(-1, dp(20)))
-        val commandRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        commandInput = EditText(this).apply {
-            hint = "Ask for a theme or launcher change"
-            setSingleLine()
-            textSize = 13f
-            typeface = UiTheme.font()
-            setTextColor(UiTheme.textPrimary)
-            setHintTextColor(UiTheme.textMuted)
-            setPadding(dp(12), 0, dp(12), 0)
-            background = UiTheme.rounded(UiTheme.card, 18f, UiTheme.accent, 1)
-        }
-        commandRow.addView(commandInput, LinearLayout.LayoutParams(0, dp(42), 1f))
-        commandRow.addView(Button(this).apply {
-            text = "Send"
-            textSize = 12f
-            setTextColor(Color.WHITE)
-            background = UiTheme.rounded(UiTheme.card, 18f, UiTheme.accent, 1)
-            contentDescription = "Ask the AI assistant or use the offline helper"
-            setOnClickListener { handlePrompt() }
-            layoutParams = LinearLayout.LayoutParams(dp(62), dp(42)).apply { leftMargin = dp(6) }
-        })
-        content.addView(commandRow, LinearLayout.LayoutParams(-1, dp(42)))
 
         val pageHeader = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         pageTitle = TextView(this).apply {
@@ -194,9 +172,7 @@ class MainActivity : Activity() {
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
         pageHeader.addView(pageTitle)
-        pageHeader.addView(smallControl("‹", 38) { setHomePage(currentPage - 1) })
         pageHeader.addView(smallControl("+ Widget", 76) { addAndroidWidget() })
-        pageHeader.addView(smallControl("›", 38) { setHomePage(currentPage + 1) })
         content.addView(pageHeader, LinearLayout.LayoutParams(-1, dp(40)))
 
         workspace = SwipeWorkspaceLayout(this) { towardRight ->
@@ -208,19 +184,18 @@ class MainActivity : Activity() {
         }
         content.addView(workspace, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        val pageDots = LinearLayout(this).apply { gravity = Gravity.CENTER }
+        pageIndicator = LinearLayout(this).apply { gravity = Gravity.CENTER }
         repeat(3) { page ->
-            pageDots.addView(TextView(this).apply {
-                text = listOf("LEFT", "MAIN", "RIGHT")[page]
-                textSize = 9f
-                gravity = Gravity.CENTER
-                typeface = UiTheme.font()
-                setTextColor(if (page == currentPage) UiTheme.accent else UiTheme.textMuted)
-                setPadding(dp(12), dp(4), dp(12), dp(4))
+            pageIndicator.addView(View(this).apply {
+                contentDescription = "${listOf("Left", "Main", "Right")[page]} home page${if (page == currentPage) ", selected" else ""}"
+                isClickable = true
+                background = UiTheme.rounded(if (page == currentPage) UiTheme.accent else UiTheme.textMuted, 4f)
                 setOnClickListener { setHomePage(page) }
+            }, LinearLayout.LayoutParams(dp(if (page == currentPage) 20 else 6), dp(6)).apply {
+                leftMargin = dp(4); rightMargin = dp(4)
             })
         }
-        content.addView(pageDots, LinearLayout.LayoutParams(-1, dp(26)))
+        content.addView(pageIndicator, LinearLayout.LayoutParams(-1, dp(22)))
 
         val bottom = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -313,6 +288,20 @@ class MainActivity : Activity() {
         updateAssistantCaption()
         updateHomePageChrome()
         render()
+        if (intent.getBooleanExtra(EXTRA_REQUEST_ADD_WIDGET, false)) {
+            intent.removeExtra(EXTRA_REQUEST_ADD_WIDGET)
+            root.post { addAndroidWidget() }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        if (intent == null) return
+        setIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_REQUEST_ADD_WIDGET, false) && ::root.isInitialized) {
+            intent.removeExtra(EXTRA_REQUEST_ADD_WIDGET)
+            root.post { addAndroidWidget() }
+        }
     }
 
     private fun createHomePage(page: Int): LinearLayout {
@@ -325,12 +314,82 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(4), dp(4), dp(4), dp(8))
         }
+        if (page == 1) {
+            val hero = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(18), dp(13), dp(18), dp(14))
+                background = UiTheme.rounded(UiTheme.card, 24f, UiTheme.accent, 1)
+                elevation = dp(4).toFloat()
+            }
+            hero.addView(TextView(this).apply {
+                text = java.text.SimpleDateFormat("EEEE, MMMM d", Locale.getDefault()).format(java.util.Date()).uppercase(Locale.getDefault())
+                textSize = 10f
+                typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                setTextColor(UiTheme.textMuted)
+            })
+            hero.addView(android.widget.TextClock(this).apply {
+                format12Hour = "h:mm"
+                format24Hour = "HH:mm"
+                textSize = 40f
+                typeface = android.graphics.Typeface.create("sans-serif-light", android.graphics.Typeface.NORMAL)
+                setTextColor(UiTheme.textPrimary)
+                contentDescription = "Current time"
+            }, LinearLayout.LayoutParams(-1, dp(52)))
+            body.addView(hero, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(10) })
+            body.addView(LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(14), dp(3), dp(8), dp(3))
+                background = UiTheme.rounded(UiTheme.card2, 22f, UiTheme.accent, 1)
+                addView(TextView(this@MainActivity).apply {
+                    text = "⌕   Search apps or open your library"
+                    textSize = 12f
+                    setTextColor(UiTheme.textMuted)
+                    layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                })
+                addView(smallControl("Apps", 56) { showDrawer() })
+            }, LinearLayout.LayoutParams(-1, dp(46)).apply { bottomMargin = dp(8) })
+            val assistantCard = LinearLayout(this).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(13), dp(10), dp(12), dp(10))
+                background = UiTheme.rounded(UiTheme.card2, 20f, UiTheme.accent2, 1)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { startActivity(Intent(this@MainActivity, AssistantActivity::class.java)) }
+            }
+            assistantCard.addView(TextView(this).apply {
+                text = "✦"
+                textSize = 24f
+                setTextColor(UiTheme.accent)
+            }, LinearLayout.LayoutParams(dp(38), -2))
+            assistantCard.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+                addView(TextView(this@MainActivity).apply {
+                    text = "Launcher assistant"
+                    textSize = 14f
+                    typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
+                    setTextColor(UiTheme.textPrimary)
+                })
+                addView(TextView(this@MainActivity).apply {
+                    val active = SettingsStore(this@MainActivity).activeKey().isNotBlank()
+                    text = if (active) "Continue a conversation · themes & wallpaper" else "Offline theme helper · set up AI anytime"
+                    textSize = 10f
+                    setTextColor(UiTheme.textMuted)
+                })
+            })
+            assistantCard.addView(TextView(this).apply {
+                text = "›"
+                textSize = 24f
+                setTextColor(UiTheme.accent2)
+            })
+            body.addView(assistantCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+        }
         body.addView(TextView(this).apply {
-            text = if (page == 1) "SHORTCUTS  ·  main workspace" else "SHORTCUTS  ·  ${if (page == 0) "left" else "right"} workspace"
+            text = if (page == 1) "YOUR APPS" else "${if (page == 0) "LEFT" else "RIGHT"} PAGE  ·  YOUR SHORTCUTS"
             textSize = 10f
             typeface = UiTheme.font()
             setTextColor(UiTheme.textMuted)
-            setPadding(dp(4), dp(2), 0, dp(6))
+            setPadding(dp(4), dp(5), 0, dp(7))
         })
         val shortcuts = GridLayout(this).apply {
             columnCount = engine.homeColumns()
@@ -343,12 +402,13 @@ class MainActivity : Activity() {
         pageWidgetContainers += widgets
         body.addView(widgets, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
         val hint = TextView(this).apply {
-            text = "Swipe between left, main, and right pages. Open Apps and long-press an icon to place a shortcut here. Add installed Android widgets from + Widget."
+            text = if (page == 1) "Swipe left or right to move between your three home pages. Touch and hold an app in Apps to add it here."
+                else "Swipe horizontally to move between home pages. Open Apps and touch and hold an icon to place a shortcut here."
             textSize = 11f
             typeface = UiTheme.font()
             setTextColor(UiTheme.textMuted)
             gravity = Gravity.CENTER
-            setPadding(dp(20), dp(22), dp(20), dp(22))
+            setPadding(dp(18), dp(14), dp(18), dp(14))
             background = UiTheme.rounded(UiTheme.card2, 18f)
         }
         body.addView(hint, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
@@ -726,14 +786,21 @@ class MainActivity : Activity() {
         val previous = currentPage
         currentPage = target
         engine.setHomePage(target)
+        val outgoing = homePages[previous]
+        val incoming = homePages[target]
         homePages.forEachIndexed { index, page ->
-            if (index == target) {
-                page.visibility = View.VISIBLE
-                page.alpha = 0f
-                page.translationX = if (target > previous) dp(42).toFloat() else -dp(42).toFloat()
-                page.animate().alpha(1f).translationX(0f).setDuration(170).start()
-            } else page.visibility = View.GONE
+            if (index != previous && index != target) page.visibility = View.GONE
         }
+        incoming.visibility = View.VISIBLE
+        incoming.alpha = 0f
+        val direction = if (target > previous) 1 else -1
+        incoming.translationX = direction * dp(48).toFloat()
+        outgoing.animate().alpha(0f).translationX(-direction * dp(48).toFloat()).setDuration(190).withEndAction {
+            outgoing.visibility = View.GONE
+            outgoing.alpha = 1f
+            outgoing.translationX = 0f
+        }.start()
+        incoming.animate().alpha(1f).translationX(0f).setDuration(220).start()
         updateHomePageChrome()
         renderHomeShortcuts()
         renderWidgets()
@@ -741,13 +808,23 @@ class MainActivity : Activity() {
 
     private fun updateHomePageChrome() {
         if (::pageTitle.isInitialized) pageTitle.text = "HOME  ·  ${listOf("LEFT PAGE", "MAIN PAGE", "RIGHT PAGE")[currentPage]}"
-        if (::content.isInitialized && content.childCount > 5) {
-            val tabs = content.getChildAt(5) as? LinearLayout
-            if (tabs != null) for (index in 0 until tabs.childCount) {
-                (tabs.getChildAt(index) as? TextView)?.setTextColor(if (index == currentPage) UiTheme.accent else UiTheme.textMuted)
+        if (::pageIndicator.isInitialized) {
+            for (index in 0 until pageIndicator.childCount) {
+                val indicator = pageIndicator.getChildAt(index)
+                indicator.background = UiTheme.rounded(if (index == currentPage) UiTheme.accent else UiTheme.textMuted, 4f)
+                val params = indicator.layoutParams as? LinearLayout.LayoutParams ?: continue
+                val targetWidth = dp(if (index == currentPage) 20 else 6)
+                if (params.width != targetWidth) {
+                    params.width = targetWidth
+                    indicator.layoutParams = params
+                }
+                indicator.contentDescription = "${listOf("Left", "Main", "Right")[index]} home page${if (index == currentPage) ", selected" else ""}"
             }
         }
-        homePages.forEachIndexed { index, page -> page.visibility = if (index == currentPage) View.VISIBLE else View.GONE }
+        homePages.forEachIndexed { index, page ->
+            if (index != currentPage && page.visibility != View.VISIBLE) page.visibility = View.GONE
+            else if (index == currentPage) page.visibility = View.VISIBLE
+        }
     }
 
     private fun showDrawer() {
@@ -766,10 +843,11 @@ class MainActivity : Activity() {
     private fun render() {
         if (!::root.isInitialized) return
         UiTheme.bind(engine)
-        (root.getChildAt(0) as? ImageView)?.apply {
-            background = UiTheme.homeBackground()
-            setImageBitmap(assets.activeWallpaper()?.let { ImageAssetValidation.decodeSampled(it, 2048) })
-        }
+        wallpaperImage.background = UiTheme.homeBackground()
+        val nextWallpaper = assets.activeWallpaper()?.let { ImageAssetValidation.decodeSampled(it, 2048) }
+        wallpaperImage.setImageBitmap(nextWallpaper)
+        wallpaperBitmap?.takeIf { it !== nextWallpaper }?.recycle()
+        wallpaperBitmap = nextWallpaper
         (root.getChildAt(1) as? FrameLayout)?.setBackgroundColor(
             Color.argb(72, Color.red(UiTheme.bg), Color.green(UiTheme.bg), Color.blue(UiTheme.bg))
         )

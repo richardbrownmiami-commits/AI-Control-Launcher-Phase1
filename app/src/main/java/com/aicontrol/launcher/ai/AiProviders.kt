@@ -42,8 +42,16 @@ private fun readResponse(conn: HttpURLConnection): String {
     }
     return String(bytes, Charsets.UTF_8)
 }
-private fun historyText(history: List<AiTurn>): String =
-    history.takeLast(8).joinToString("\n") { it.role + ": " + it.content }
+private fun openRouterContent(message: JSONObject): String {
+    val content = message.opt("content")
+    if (content is String) return content
+    if (content is JSONArray) {
+        return (0 until content.length()).mapNotNull { index ->
+            content.optJSONObject(index)?.optString("text")?.takeIf { it.isNotBlank() }
+        }.joinToString("\n")
+    }
+    throw IllegalArgumentException("OpenRouter returned no readable assistant text. Check the selected model and provider response format.")
+}
 
 class OpenRouterProvider(private val model: String, private val apiKey: String) : AiProvider {
     override suspend fun chat(userMessage: String, launcherState: String, history: List<AiTurn>): Result<AiReply> =
@@ -51,17 +59,18 @@ class OpenRouterProvider(private val model: String, private val apiKey: String) 
             runCatching {
                 require(apiKey.isNotBlank()) { "OpenRouter API key is empty" }
                 require(model.isNotBlank()) { "OpenRouter model is empty" }
-                val prompt = buildString {
-                    append("Launcher state:\n"); append(launcherState)
-                    append("\nConversation history:\n"); append(historyText(history))
-                    append("\nCurrent user message:\n"); append(userMessage)
+                val messages = JSONArray()
+                    .put(JSONObject().put("role", "system").put("content", AiPlanner.SYSTEM_PROMPT))
+                history.takeLast(8).forEach { turn ->
+                    val role = if (turn.role == "assistant") "assistant" else "user"
+                    messages.put(JSONObject().put("role", role).put("content", turn.content))
                 }
+                val prompt = "Launcher state (read-only context):\n$launcherState\n\nCurrent user message:\n$userMessage"
+                messages.put(JSONObject().put("role", "user").put("content", prompt))
                 val body = JSONObject().apply {
                     put("model", model)
                     put("temperature", 0.4)
-                    put("messages", JSONArray()
-                        .put(JSONObject().put("role", "system").put("content", AiPlanner.SYSTEM_PROMPT))
-                        .put(JSONObject().put("role", "user").put("content", prompt)))
+                    put("messages", messages)
                 }.toString()
                 val conn = (URL("https://openrouter.ai/api/v1/chat/completions").openConnection() as HttpURLConnection).apply {
                     requestMethod="POST"; connectTimeout=15000; readTimeout=30000; doOutput=true
@@ -73,7 +82,12 @@ class OpenRouterProvider(private val model: String, private val apiKey: String) 
                     conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
                     val response=readResponse(conn)
                     if(conn.responseCode !in 200..299) error("OpenRouter HTTP "+conn.responseCode+": "+errorBody(response))
-                    val content=JSONObject(response).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
+                    val root = JSONObject(response)
+                    val choices = root.optJSONArray("choices")
+                        ?: throw IllegalArgumentException("OpenRouter returned an unexpected response. ${errorBody(response)}")
+                    require(choices.length() > 0) { "OpenRouter returned no response choices. ${errorBody(response)}" }
+                    val content = openRouterContent(choices.optJSONObject(0)?.optJSONObject("message")
+                        ?: throw IllegalArgumentException("OpenRouter response was missing its assistant message."))
                     require(content.length <= 16_000) { "AI response is too large to review safely." }
                     AiReply(content)
                 } finally { conn.disconnect() }
@@ -107,7 +121,18 @@ class GeminiProvider(private val model: String, private val apiKey: String) : Ai
                     conn.outputStream.use{it.write(body.toByteArray(Charsets.UTF_8))}
                     val response=readResponse(conn)
                     if(conn.responseCode !in 200..299) error("Gemini HTTP "+conn.responseCode+": "+errorBody(response))
-                    val content=JSONObject(response).getJSONArray("candidates").getJSONObject(0).getJSONObject("content").getJSONArray("parts").getJSONObject(0).getString("text")
+                    val root = JSONObject(response)
+                    val candidates = root.optJSONArray("candidates")
+                        ?: throw IllegalArgumentException("Gemini returned no response candidates. ${errorBody(response)}")
+                    require(candidates.length() > 0) {
+                        val reason = root.optJSONObject("promptFeedback")?.optString("blockReason").orEmpty()
+                        if (reason.isNotBlank()) "Gemini did not return a reply (provider block reason: $reason)." else "Gemini returned no reply candidates."
+                    }
+                    val parts = candidates.optJSONObject(0)?.optJSONObject("content")?.optJSONArray("parts")
+                        ?: throw IllegalArgumentException("Gemini response had no readable text part. ${errorBody(response)}")
+                    val content = (0 until parts.length()).mapNotNull { parts.optJSONObject(it)?.optString("text")?.takeIf(String::isNotBlank) }
+                        .joinToString("\n")
+                    require(content.isNotBlank()) { "Gemini returned an empty assistant reply." }
                     require(content.length <= 16_000) { "AI response is too large to review safely." }
                     AiReply(content)
                 }finally{conn.disconnect()}

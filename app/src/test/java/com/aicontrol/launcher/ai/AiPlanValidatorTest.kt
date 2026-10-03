@@ -29,6 +29,33 @@ class AiPlanValidatorTest {
     }
 
     @Test
+    fun acceptsMarkdownAndProseWrappersAroundAValidJsonObject() {
+        val decision = AiPlanValidator.parse(
+            "Here is the reviewed plan:\n```json\n{\"message\":\"A calm theme is ready\",\"theme\":{\"operation\":\"CREATE\",\"name\":\"Calm blue\"},\"actions\":[]}\n```\n",
+            themes
+        ) as AiPlanDecision.Review
+        assertEquals("Calm blue", (decision.plan.theme as AiThemeOperation.Create).values.name)
+    }
+
+    @Test
+    fun acceptsStringifiedJsonForKnownTypedFieldsWithoutExpandingTheAllowlist() {
+        val decision = AiPlanValidator.parse(
+            """{"message":"Searching a licensed wallpaper","theme":"{\"operation\":\"CREATE\",\"name\":\"Soft dusk\"}","actions":"[{\"type\":\"SEARCH_ASSETS\",\"query\":\"soft dusk abstract wallpaper\"}]"}""",
+            themes
+        ) as AiPlanDecision.Review
+        assertEquals("Soft dusk", (decision.plan.theme as AiThemeOperation.Create).values.name)
+        assertTrue(decision.plan.actions.single() is AiLauncherAction.SearchAssets)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun wrapperToleranceDoesNotPermitUnsupportedActions() {
+        AiPlanValidator.parse(
+            "Response: ```json\n{\"message\":\"Run code\",\"actions\":[{\"type\":\"EXECUTE_CODE\",\"code\":\"anything\"}]}\n```",
+            themes
+        )
+    }
+
+    @Test
     fun validatesPresetDisplayAttributesForAiCreatedThemes() {
         val decision = AiPlanValidator.parse(
             """{"message":"A calm preset","theme":{"operation":"CREATE","name":"Sage AI","typography":"serif","iconStyle":"squircle","backgroundStyle":"aurora"},"actions":[]}""",

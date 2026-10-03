@@ -13,6 +13,7 @@ import com.aicontrol.launcher.assets.AssetAttribution
 import com.aicontrol.launcher.assets.AssetCatalog
 import com.aicontrol.launcher.assets.AssetImporter
 import com.aicontrol.launcher.assets.CreativeCommonsAssetSearch
+import com.aicontrol.launcher.assets.ImageAssetValidation
 import com.aicontrol.launcher.assets.LauncherAssetManager
 import com.aicontrol.launcher.assets.WallpaperCandidate
 import kotlinx.coroutines.CancellationException
@@ -23,6 +24,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 class AssetsActivity : Activity() {
     companion object {
@@ -234,27 +237,107 @@ class AssetsActivity : Activity() {
     }
 
     private fun downloadCandidate(candidate: WallpaperCandidate) {
-        Toast.makeText(this, "Downloading wallpaper…", Toast.LENGTH_SHORT).show()
+        val canceled = AtomicBoolean(false)
+        val details = TextView(this).apply {
+            text = "${candidate.title}\n${candidate.license} · ${candidate.creator}\n\nConnecting to Wikimedia Commons…"
+            textSize = 12f
+            setTextColor(UiTheme.textPrimary)
+            setPadding(dp(18), dp(8), dp(18), dp(8))
+        }
+        val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+            max = 100
+            setPadding(dp(18), dp(8), dp(18), dp(8))
+        }
+        val body = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(details)
+            addView(progress, LinearLayout.LayoutParams(-1, dp(40)))
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Downloading licensed wallpaper")
+            .setView(body)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener {
+                canceled.set(true)
+                details.text = "Canceling download… The partial file will be discarded."
+                it.isEnabled = false
+            }
+        }
+        dialog.show()
         scope.launch {
             try {
-                val file = withContext(Dispatchers.IO) { manager.downloadLicensedWallpaper(candidate).getOrThrow() }
+                val file = withContext(Dispatchers.IO) {
+                    manager.downloadLicensedWallpaper(candidate, { !canceled.get() }) { downloaded, total ->
+                        runOnUiThread {
+                            if (!canceled.get() && dialog.isShowing) {
+                                if (total > 0) {
+                                    progress.isIndeterminate = false
+                                    progress.progress = ((downloaded * 100L) / total).toInt().coerceIn(0, 100)
+                                    details.text = "${candidate.title}\n${candidate.license} · ${candidate.creator}\n\n${formatBytes(downloaded)} of ${formatBytes(total)}"
+                                } else details.text = "${candidate.title}\n${candidate.license} · ${candidate.creator}\n\n${formatBytes(downloaded)} downloaded…"
+                            }
+                        }
+                    }.getOrThrow()
+                }
+                if (canceled.get()) return@launch
+                dialog.dismiss()
                 render()
-                AlertDialog.Builder(this@AssetsActivity)
-                    .setTitle("Wallpaper saved")
-                    .setMessage("${candidate.title}\n\nLicense: ${candidate.license}\nCreator: ${candidate.creator}\nSource: ${candidate.pageUrl}\n\nSet as this launcher's background? The device wallpaper will not be changed.")
-                    .setNegativeButton("Not now", null)
-                    .setPositiveButton("Use in launcher") { _, _ ->
-                        manager.setLauncherWallpaper(file)
-                            .onSuccess { Toast.makeText(this@AssetsActivity, "Launcher background updated", Toast.LENGTH_SHORT).show() }
-                            .onFailure { Toast.makeText(this@AssetsActivity, it.message, Toast.LENGTH_LONG).show() }
-                    }
-                    .show()
+                showDownloadedPreview(file, candidate)
             } catch (error: Exception) {
-                if (error is CancellationException) throw error
-                Toast.makeText(this@AssetsActivity, error.message ?: "Wallpaper download failed", Toast.LENGTH_LONG).show()
+                if (error is CancellationException && !canceled.get()) throw error
+                dialog.dismiss()
+                val message = if (canceled.get()) "Download canceled. No partial image was saved." else error.message ?: "Wallpaper download failed."
+                AlertDialog.Builder(this@AssetsActivity).setTitle(if (canceled.get()) "Download canceled" else "Download failed")
+                    .setMessage(message).setPositiveButton(android.R.string.ok, null).show()
             }
         }
     }
+
+    private fun showDownloadedPreview(file: File, candidate: WallpaperCandidate) {
+        val preview = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(6), dp(18), dp(8))
+        }
+        val bitmap = ImageAssetValidation.decodeSampled(file, 1200)
+        if (bitmap != null) preview.addView(ImageView(this).apply {
+            setImageBitmap(bitmap)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            contentDescription = "Preview of ${candidate.title}"
+        }, LinearLayout.LayoutParams(-1, dp(190)))
+        preview.addView(TextView(this).apply {
+            text = "${candidate.title}\n\nCreator: ${candidate.creator}\nLicense: ${candidate.license}\nLicense details: ${candidate.licenseUrl}\nSource: ${candidate.pageUrl}\n\nChoose where to use this downloaded image. Applying inside the launcher does not alter Android's device wallpaper."
+            textSize = 11f
+            setTextColor(UiTheme.textPrimary)
+            setPadding(0, dp(8), 0, 0)
+        })
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Preview downloaded wallpaper")
+            .setView(preview)
+            .setNegativeButton("Keep in library", null)
+            .setNeutralButton("Device wallpaper…", null)
+            .setPositiveButton("Set launcher background", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                manager.setLauncherWallpaper(file).onSuccess {
+                    Toast.makeText(this, "Launcher background updated successfully", Toast.LENGTH_SHORT).show()
+                    dialog.dismiss()
+                }.onFailure {
+                    Toast.makeText(this, it.message ?: "Launcher background was not changed", Toast.LENGTH_LONG).show()
+                }
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                dialog.dismiss()
+                confirmDeviceWallpaper(file)
+            }
+        }
+        dialog.show()
+    }
+
+    private fun formatBytes(bytes: Long): String = String.format(Locale.getDefault(), "%.1f MB", bytes / (1024f * 1024f))
 
     private fun render() {
         list.removeAllViews()

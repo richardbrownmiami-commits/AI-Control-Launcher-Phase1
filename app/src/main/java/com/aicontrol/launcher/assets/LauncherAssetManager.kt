@@ -15,7 +15,11 @@ class LauncherAssetManager(private val context: Context) {
     fun downloadWallpaper(url: String, name: String = "current"): Result<File> =
         downloader.download(url, store.wallpaper(name)).map { it.file }
 
-    fun downloadLicensedWallpaper(candidate: WallpaperCandidate): Result<File> = runCatching {
+    fun downloadLicensedWallpaper(
+        candidate: WallpaperCandidate,
+        shouldContinue: () -> Boolean = { true },
+        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> }
+    ): Result<File> = runCatching {
         require(AssetLicensePolicy.isReusable(candidate.license)) { "This wallpaper's license is not approved for reuse." }
         require(candidate.imageUrl.startsWith("https://upload.wikimedia.org/wikipedia/commons/")) {
             "Wallpaper image must come from Wikimedia Commons."
@@ -25,7 +29,13 @@ class LauncherAssetManager(private val context: Context) {
         val extension = candidate.imageUrl.substringBefore('?').substringAfterLast('.', "jpg")
             .lowercase().takeIf { it in setOf("jpg", "jpeg", "png", "webp") } ?: "jpg"
         val file = store.wallpaper("${base}_${System.currentTimeMillis()}.$extension")
-        val downloaded = downloader.download(candidate.imageUrl, file).getOrThrow().file
+        val downloaded = downloader.download(
+            candidate.imageUrl,
+            file,
+            allowedHosts = setOf("upload.wikimedia.org"),
+            shouldContinue = shouldContinue,
+            onProgress = onProgress
+        ).getOrThrow().file
         attributions.record(AssetAttribution(
             type = "wallpaper", name = downloaded.name, title = candidate.title,
             creator = candidate.creator, license = candidate.license,
@@ -40,8 +50,10 @@ class LauncherAssetManager(private val context: Context) {
             "Choose a wallpaper stored in this launcher's private asset library."
         }
         ImageAssetValidation.validate(file)
-        context.getSharedPreferences("launcher_state", Context.MODE_PRIVATE)
-            .edit().putString("active_wallpaper", file.name).apply()
+        check(context.getSharedPreferences("launcher_state", Context.MODE_PRIVATE)
+            .edit().putString("active_wallpaper", file.name).commit()) {
+            "The wallpaper is valid, but the launcher could not save it as the active background."
+        }
     }
 
     fun applyWallpaper(file: File): Result<Unit> = runCatching {
@@ -52,7 +64,6 @@ class LauncherAssetManager(private val context: Context) {
         } finally {
             bitmap.recycle()
         }
-        context.getSharedPreferences("launcher_state", Context.MODE_PRIVATE).edit().putString("active_wallpaper", file.name).apply()
     }
 
     fun activeWallpaper(): File? {

@@ -40,7 +40,7 @@ object AiPlanValidator {
 
     fun parse(raw: String, availableThemes: Set<String>): AiPlanDecision {
         require(raw.length <= MAX_RESPONSE_CHARS) { "AI response is too large to review safely." }
-        val root = JSONObject(raw.trim())
+        val root = parseResponseObject(raw)
         requireOnlyKeys(root, setOf("message", "clarification", "theme", "actions"), setOf("message"), "response")
         val message = requiredString(root, "message", MAX_MESSAGE_CHARS)
         val clarification = optionalString(root, "clarification", MAX_CLARIFICATION_CHARS)
@@ -159,12 +159,61 @@ object AiPlanValidator {
 
     private fun optionalObject(value: JSONObject, key: String): JSONObject? {
         if (!value.has(key) || value.isNull(key)) return null
-        return value.opt(key) as? JSONObject ?: throw IllegalArgumentException("'$key' must be an object or null.")
+        return when (val nested = value.opt(key)) {
+            is JSONObject -> nested
+            is String -> runCatching { JSONObject(nested.trim()) }.getOrElse {
+                throw IllegalArgumentException("'$key' must contain a valid JSON object or null.")
+            }
+            else -> throw IllegalArgumentException("'$key' must be an object or null.")
+        }
     }
 
     private fun optionalArray(value: JSONObject, key: String): JSONArray? {
         if (!value.has(key) || value.isNull(key)) return null
-        return value.opt(key) as? JSONArray ?: throw IllegalArgumentException("'$key' must be an array or null.")
+        return when (val nested = value.opt(key)) {
+            is JSONArray -> nested
+            is String -> runCatching { JSONArray(nested.trim()) }.getOrElse {
+                throw IllegalArgumentException("'$key' must contain a valid JSON array or null.")
+            }
+            else -> throw IllegalArgumentException("'$key' must be an array or null.")
+        }
+    }
+
+    /** Accepts common model wrappers without relaxing the typed plan schema. */
+    private fun parseResponseObject(raw: String): JSONObject {
+        val text = raw.trim().removePrefix("\uFEFF")
+        val starts = text.indices.filter { text[it] == '{' }
+        for (start in starts) {
+            var depth = 0
+            var inString = false
+            var escaped = false
+            for (index in start until text.length) {
+                val char = text[index]
+                if (inString) {
+                    when {
+                        escaped -> escaped = false
+                        char == '\\' -> escaped = true
+                        char == '"' -> inString = false
+                    }
+                    continue
+                }
+                when (char) {
+                    '"' -> inString = true
+                    '{' -> depth++
+                    '}' -> {
+                        depth--
+                        if (depth == 0) {
+                            val candidate = text.substring(start, index + 1)
+                            val parsed = runCatching { JSONObject(candidate) }.getOrNull()
+                            if (parsed != null) return parsed
+                            break
+                        }
+                        if (depth < 0) break
+                    }
+                }
+            }
+        }
+        throw IllegalArgumentException("Could not parse the provider reply as a JSON object. Return one object with message, theme, and actions fields.")
     }
 
     private fun requireOnlyKeys(value: JSONObject, allowed: Set<String>, required: Set<String>, label: String) {

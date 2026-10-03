@@ -28,6 +28,7 @@
         <activity android:name=".ui.LauncherSettingsActivity" android:exported="false" />
         <activity android:name=".ui.ThemeGalleryActivity" android:exported="false" />
         <activity android:name=".ui.AssetsActivity" android:exported="false" />
+        <activity android:name=".ui.AssistantActivity" android:exported="false" />
         <activity android:name=".ui.MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
