@@ -42,4 +42,19 @@ class OpenMojiIconMatcherTest {
         )
         assertEquals("1F4F7", result.single().glyph.code)
     }
+
+    @Test
+    fun bundledCatalogAutomaticallyCoversCommonLauncherLabelsOffline() {
+        val labels = listOf("Phone", "Messages", "Camera", "Calendar", "Clock", "Gmail", "Chrome", "Maps",
+            "Contacts", "Settings", "Files", "Music", "Play Store", "Weather", "Calculator", "Notes")
+        val mapped = OpenMojiIconMatcher.assign(
+            BundledOpenMojiCatalog.glyphs,
+            labels.mapIndexed { index, label -> "org.example.app$index" to label },
+            "Ocean"
+        )
+        assertEquals(labels.size, mapped.size)
+        assertEquals("1F4E7", mapped.first { it.appLabel == "Gmail" }.glyph.code)
+        assertEquals("2699", mapped.first { it.appLabel == "Settings" }.glyph.code)
+        assertTrue(mapped.all { it.glyph in BundledOpenMojiCatalog.glyphs })
+    }
 }

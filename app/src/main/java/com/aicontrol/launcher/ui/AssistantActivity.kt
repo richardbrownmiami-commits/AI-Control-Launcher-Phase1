@@ -50,6 +50,7 @@ class AssistantActivity : Activity() {
 
     private lateinit var engine: ActionEngine
     private lateinit var appRepository: AppRepository
+    private lateinit var previewAssets: ThemePreviewAssets
     private lateinit var iconPacks: IconPackManager
     private lateinit var transcript: LinearLayout
     private lateinit var transcriptScroll: ScrollView
@@ -74,6 +75,7 @@ class AssistantActivity : Activity() {
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         engine = ActionEngine(this)
         appRepository = AppRepository(this)
+        previewAssets = ThemePreviewAssets(this, engine, appRepository)
         iconPacks = IconPackManager(this)
         UiTheme.bind(engine)
         loadThread()
@@ -366,7 +368,7 @@ class AssistantActivity : Activity() {
             try {
                 val reply = withContext(Dispatchers.IO) { provider.chat(prompt, state, history).getOrThrow() }
                 val decision = try {
-                    AiPlanValidator.parse(reply.text, engine.availableThemes(), iconPacks.assistantChoices())
+                    AiPlanValidator.parse(reply.text, engine.availableThemes(), iconPacks.assistantChoices(), promptContext = prompt)
                 } catch (error: Exception) {
                     appendStatus("The provider replied, but its plan could not be read: ${error.message ?: "Invalid response format."} Nothing was changed. Try rephrasing or asking for plain guidance.")
                     return@launch
@@ -579,7 +581,9 @@ class AssistantActivity : Activity() {
         layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7); bottomMargin = dp(8) }
     }
 
-    private fun themePreview(values: ThemeSpec.Values) = LinearLayout(this).apply {
+    private fun themePreview(values: ThemeSpec.Values): LinearLayout {
+        val wallpaperPreview = previewAssets.wallpaper(values, 86)
+        return LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(12), dp(10), dp(12), dp(10))
         background = UiTheme.rounded(Color.parseColor(values.background), 16f, Color.parseColor(values.accent), 1)
@@ -589,8 +593,14 @@ class AssistantActivity : Activity() {
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
             setTextColor(contrast(values.background))
         })
+        wallpaperPreview?.let { addView(it, LinearLayout.LayoutParams(-1, dp(86)).apply { topMargin = dp(6) }) }
+        if (values.wallpaperAsset != null && wallpaperPreview == null) addView(TextView(this@AssistantActivity).apply {
+            text = "Wallpaper file unavailable · rebuild before applying"
+            textSize = 10f
+            setTextColor(UiTheme.accent)
+        })
         addView(TextView(this@AssistantActivity).apply {
-            text = "${values.typography} type · ${values.iconStyle} icons · ${values.backgroundStyle} background"
+            text = "${values.typography} type · ${values.iconStyle} icons · ${values.backgroundStyle} background · known app labels auto-map"
             textSize = 10f
             setTextColor(contrast(values.background))
             setPadding(0, dp(4), 0, dp(7))
@@ -602,7 +612,10 @@ class AssistantActivity : Activity() {
             }, LinearLayout.LayoutParams(0, dp(25), 1f).apply { leftMargin = dp(3); rightMargin = dp(3) })
         }
         addView(swatches)
+        addView(previewAssets.iconStrip(values, maxIcons = 4, iconSizeDp = 28),
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
         layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5); bottomMargin = dp(8) }
+        }
     }
 
     private fun contrast(hex: String): Int {
@@ -653,7 +666,7 @@ class AssistantActivity : Activity() {
                 browseIconPacks -> IconPackStore.open(this).getOrThrow()
             }
             setStatus(when {
-                query != null && draftName != null -> "Theme draft saved. Review the Commons license, choose an image, then preview and apply the complete bundle."
+                query != null && draftName != null -> "Theme draft saved. An open-license wallpaper and known-label icons were bundled; preview the saved files before applying."
                 query != null -> "Confirmed. Wallpaper search is open; review a result and its license before downloading."
                 addWidget -> "Confirmed. Choose an installed widget in Android's picker."
                 browseIconPacks -> "Confirmed. Google Play search is open; install a pack there, then select it in Launcher settings."

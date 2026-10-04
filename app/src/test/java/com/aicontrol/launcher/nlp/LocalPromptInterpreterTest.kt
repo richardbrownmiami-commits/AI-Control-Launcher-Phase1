@@ -2,6 +2,7 @@ package com.aicontrol.launcher.nlp
 
 import com.aicontrol.launcher.theme.ThemeSpec
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -31,7 +32,7 @@ class LocalPromptInterpreterTest {
         val result = LocalPromptInterpreter.interpret("Make a Spider-Man theme", apps, themes)
         assertTrue(result is PromptInterpretation.Ready)
         val values = (result as PromptInterpretation.Ready).command.let { (it as LauncherCommand.CreateTheme).values }
-        assertEquals("Spider-Man", values.name)
+        assertEquals("Spider-Inspired", values.name)
         assertEquals("#E62429", values.accent)
         assertEquals("#1E5AA8", values.accent2)
         assertEquals("neon", values.style)
@@ -43,6 +44,14 @@ class LocalPromptInterpreterTest {
         val values = ((result as PromptInterpretation.Ready).command as LauncherCommand.CreateTheme).values
         assertEquals("Coral reef", values.name)
         assertEquals(ThemeSpec.DEFAULT_ACCENT, values.accent)
+    }
+
+    @Test fun explicitColorsOnlyRequestDoesNotAttachWallpaperOffline() {
+        val result = LocalPromptInterpreter.interpret("Make a theme called Ocean, colors only", apps, themes)
+        assertTrue(result is PromptInterpretation.Ready)
+        val values = ((result as PromptInterpretation.Ready).command as LauncherCommand.CreateTheme).values
+        assertEquals("Ocean", values.name)
+        assertNull(values.wallpaperAsset)
     }
 
     @Test fun resolvesPresetThemeWithoutCreatingAFile() {

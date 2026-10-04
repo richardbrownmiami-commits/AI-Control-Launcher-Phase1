@@ -123,12 +123,13 @@ object LocalPromptInterpreter {
         return try {
             val palette = ThemeSpec.suggestedPalette(name)
             val values = ThemeSpec.validate(
-                name = name,
+                name = ThemeSpec.safeThemeDisplayName(name),
                 background = colorAfter(text, listOf("background", "bg")) ?: palette.background,
                 accent = colorAfter(text, listOf("accent")) ?: palette.accent,
                 accent2 = colorAfter(text, listOf("secondary accent", "accent2")) ?: palette.accent2,
                 card = colorAfter(text, listOf("card")) ?: palette.card,
-                style = styleAfter(text) ?: palette.style
+                style = styleAfter(text) ?: palette.style,
+                wallpaperAsset = if (ThemeSpec.isPaletteOnlyRequest(text)) null else palette.wallpaperAsset
             )
             val preview = "Create '${values.name}' — background ${values.background}, accent ${values.accent}, secondary accent ${values.accent2}, card ${values.card}, ${values.style} style."
             PromptInterpretation.Ready(LauncherCommand.CreateTheme(values), preview)

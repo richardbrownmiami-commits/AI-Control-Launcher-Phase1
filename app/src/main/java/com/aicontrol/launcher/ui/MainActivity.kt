@@ -16,6 +16,7 @@ import com.aicontrol.launcher.actions.ActionEngine
 import com.aicontrol.launcher.apps.AppInfo
 import com.aicontrol.launcher.apps.AppRepository
 import com.aicontrol.launcher.assets.LauncherAssetManager
+import com.aicontrol.launcher.assets.AssetStore
 import com.aicontrol.launcher.assets.ImageAssetValidation
 import com.aicontrol.launcher.ai.AiLauncherAction
 import com.aicontrol.launcher.ai.AiPlanConfirmationGate
@@ -53,6 +54,7 @@ class MainActivity : Activity() {
     private lateinit var engine: ActionEngine
     private lateinit var assets: LauncherAssetManager
     private lateinit var iconPacks: IconPackManager
+    private lateinit var previewAssets: ThemePreviewAssets
     private lateinit var root: FrameLayout
     private lateinit var content: LinearLayout
     private lateinit var wallpaperImage: ImageView
@@ -91,8 +93,17 @@ class MainActivity : Activity() {
         engine = ActionEngine(this)
         assets = LauncherAssetManager(this)
         iconPacks = IconPackManager(this)
+        previewAssets = ThemePreviewAssets(this, engine, apps)
         workspaceStore = WorkspaceStore(this)
         currentPage = engine.homePage()
+        val activeWallpaper = assets.activeWallpaper()
+        val activeWallpaperValid = activeWallpaper?.let {
+            runCatching { ImageAssetValidation.validate(it) }.isSuccess
+        } == true
+        if (!activeWallpaperValid) {
+            val bundled = runCatching { engine.themeValues().wallpaperAsset?.let { AssetStore(this).wallpaper(it) } }.getOrNull()
+            if (bundled?.isFile == true) runCatching { assets.setLauncherWallpaper(bundled).getOrThrow() }
+        }
         widgetManager = getSystemService(AppWidgetManager::class.java)
         widgetHost = AppWidgetHost(this, WIDGET_HOST_ID)
         buildUi()
@@ -206,7 +217,7 @@ class MainActivity : Activity() {
         }.apply { clipChildren = true }
         repeat(3) { page ->
             homePages += createHomePage(page)
-            workspace.addView(homePages.last(), FrameLayout.LayoutParams(-1, -1))
+            workspace.addView(homePages.last(), FrameLayout.LayoutParams(-1, -1).apply { bottomMargin = dp(48) })
         }
         content.addView(workspace, LinearLayout.LayoutParams(-1, 0, 1f))
 
@@ -223,7 +234,7 @@ class MainActivity : Activity() {
                 }, FrameLayout.LayoutParams(dp(if (page == currentPage) 18 else 6), dp(5), Gravity.CENTER))
             }, LinearLayout.LayoutParams(dp(48), dp(48)))
         }
-        content.addView(pageIndicator, LinearLayout.LayoutParams(-1, dp(48)))
+        workspace.addView(pageIndicator, FrameLayout.LayoutParams(-1, dp(48), Gravity.BOTTOM))
 
         val bottom = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -501,7 +512,7 @@ class MainActivity : Activity() {
                     provider.chat(prompt, state, aiHistory.toList()).getOrThrow()
                 }
                 val decision = try {
-                    AiPlanValidator.parse(reply.text, engine.availableThemes(), iconPacks.assistantChoices())
+                    AiPlanValidator.parse(reply.text, engine.availableThemes(), iconPacks.assistantChoices(), promptContext = prompt)
                 } catch (error: Exception) {
                     showAiValidationFailure(reply.text, error)
                     return@launch
@@ -686,7 +697,7 @@ class MainActivity : Activity() {
             browseIconPacks -> IconPackStore.open(this).getOrThrow()
         }
         val confirmation = if (assetQuery != null && themeDraftName != null) {
-            "Theme draft saved. Add a licensed wallpaper, preview it, and choose when to apply."
+            "Theme draft saved. A licensed wallpaper and known-label icons will be bundled automatically for review before apply."
         } else "Confirmed plan applied. You can change installed icon packs in Launcher settings."
         Toast.makeText(this, confirmation, Toast.LENGTH_LONG).show()
     }
@@ -745,7 +756,7 @@ class MainActivity : Activity() {
         val accent2 = Color.parseColor(values.accent2)
         val card = Color.parseColor(values.card)
         val backgroundText = UiTheme.contrasting(background)
-        val cardText = UiTheme.contrasting(card)
+        val wallpaperPreview = previewAssets.wallpaper(values, 92)
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(18), dp(18), dp(18), dp(18))
@@ -755,8 +766,15 @@ class MainActivity : Activity() {
                 textSize = 18f
                 setTextColor(backgroundText)
             })
+            wallpaperPreview?.let { addView(it, LinearLayout.LayoutParams(-1, dp(92)).apply { topMargin = dp(7) }) }
+            if (values.wallpaperAsset != null && wallpaperPreview == null) addView(TextView(this@MainActivity).apply {
+                text = "Wallpaper file unavailable · it must be rebuilt before apply"
+                textSize = 10f
+                setTextColor(UiTheme.accent)
+            })
             addView(TextView(this@MainActivity).apply {
-                text = "${values.layout} layout · ${values.typography} type · ${values.iconStyle} icons · ${values.backgroundStyle} background. ${values.iconAssets.size} custom app-icon mappings."
+                text = "${values.layout} layout · ${values.typography} type · ${values.iconStyle} icons · ${values.backgroundStyle} background. " +
+                    (if (values.iconAssets.isEmpty()) "Known app labels auto-map to OpenMoji." else "${values.iconAssets.size} saved app-icon mappings.")
                 textSize = 11f
                 setTextColor(backgroundText)
                 setPadding(0, dp(3), 0, dp(12))
@@ -784,20 +802,14 @@ class MainActivity : Activity() {
                 setTextColor(backgroundText)
                 setPadding(dp(4), dp(2), dp(4), 0)
             })
-            addView(LinearLayout(this@MainActivity).apply {
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(10), dp(8), dp(10), dp(8))
-                this.background = UiTheme.rounded(card, 14f, accent, 1)
-                addView(View(this@MainActivity).apply {
-                    setBackground(UiTheme.rounded(accent, 15f))
-                    layoutParams = LinearLayout.LayoutParams(dp(30), dp(30))
-                })
-                addView(TextView(this@MainActivity).apply {
-                    text = "  App icons     Search     Dock"
-                    textSize = 12f
-                    setTextColor(cardText)
-                })
-            }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
+            addView(TextView(this@MainActivity).apply {
+                text = "KNOWN APP LABELS · LOCAL OPENMOJI MAPPING"
+                textSize = 9f
+                setTextColor(backgroundText)
+                setPadding(0, dp(8), 0, dp(2))
+            })
+            addView(previewAssets.iconStrip(values, maxIcons = 4, iconSizeDp = 30),
+                LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
         }
     }
 
@@ -834,6 +846,11 @@ class MainActivity : Activity() {
         val previous = currentPage
         currentPage = target
         engine.setHomePage(target)
+        homePages.forEach { page ->
+            page.animate().cancel()
+            page.alpha = 1f
+            page.translationX = 0f
+        }
         val outgoing = homePages[previous]
         val incoming = homePages[target]
         homePages.forEachIndexed { index, page ->
@@ -842,13 +859,14 @@ class MainActivity : Activity() {
         incoming.visibility = View.VISIBLE
         incoming.alpha = 0f
         val direction = if (target > previous) 1 else -1
-        incoming.translationX = direction * dp(48).toFloat()
-        outgoing.animate().alpha(0f).translationX(-direction * dp(48).toFloat()).setDuration(190).withEndAction {
+        val transitionDistance = maxOf(dp(48).toFloat(), workspace.width * 0.22f)
+        incoming.translationX = direction * transitionDistance
+        outgoing.animate().alpha(0f).translationX(-direction * transitionDistance).setDuration(200).withEndAction {
             outgoing.visibility = View.GONE
             outgoing.alpha = 1f
             outgoing.translationX = 0f
         }.start()
-        incoming.animate().alpha(1f).translationX(0f).setDuration(220).start()
+        incoming.animate().alpha(1f).translationX(0f).setDuration(230).start()
         updateHomePageChrome()
         renderHomeShortcuts()
         renderWidgets()
@@ -1087,8 +1105,11 @@ class MainActivity : Activity() {
         val themeIcon = engine.themeIconFile(engine.theme(), app.packageName)?.let {
             android.graphics.drawable.Drawable.createFromPath(it.absolutePath)
         }
+        val automaticIcon = previewAssets.bundledIconFile(app.label, engine.theme())?.let {
+            android.graphics.drawable.Drawable.createFromPath(it.absolutePath)
+        }
         val icon = ImageView(this).apply {
-            setImageDrawable(themeIcon ?: assets.iconDrawable(app.packageName) ?: pack ?: app.icon)
+            setImageDrawable(themeIcon ?: assets.iconDrawable(app.packageName) ?: pack ?: automaticIcon ?: app.icon)
             contentDescription = app.label
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(dp(4), dp(4), dp(4), dp(4))
@@ -1192,8 +1213,11 @@ class MainActivity : Activity() {
             val themeIcon = engine.themeIconFile(engine.theme(), app.packageName)?.let {
                 android.graphics.drawable.Drawable.createFromPath(it.absolutePath)
             }
+            val automaticIcon = previewAssets.bundledIconFile(app.label, engine.theme())?.let {
+                android.graphics.drawable.Drawable.createFromPath(it.absolutePath)
+            }
             dock.addView(ImageButton(this).apply {
-                setImageDrawable(themeIcon ?: assets.iconDrawable(app.packageName) ?: pack ?: app.icon)
+                setImageDrawable(themeIcon ?: assets.iconDrawable(app.packageName) ?: pack ?: automaticIcon ?: app.icon)
                 contentDescription = item.optString("label", app.label)
                 background = UiTheme.rounded(Color.TRANSPARENT, 16f)
                 setPadding(dp(6), dp(6), dp(6), dp(6))
@@ -1240,38 +1264,77 @@ private class SwipeWorkspaceLayout(
     context: android.content.Context,
     private val onSwipe: (towardRight: Boolean) -> Unit
 ) : FrameLayout(context) {
-    private var startX = 0f
-    private var startY = 0f
-    private var isHorizontalSwipe = false
-    private val threshold = (58 * resources.displayMetrics.density).toInt()
+    private val gesture = WorkspaceSwipeGesture(
+        android.view.ViewConfiguration.get(context).scaledTouchSlop,
+        resources.displayMetrics.density
+    )
+    private var activePointerId = MotionEvent.INVALID_POINTER_ID
+    private var pendingDirection: WorkspaceSwipeDirection? = null
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                startX = event.x
-                startY = event.y
-                isHorizontalSwipe = false
+                activePointerId = event.getPointerId(event.actionIndex)
+                pendingDirection = null
+                gesture.begin(event.getX(event.actionIndex), event.getY(event.actionIndex))
             }
             MotionEvent.ACTION_MOVE -> {
-                val dx = event.x - startX
-                val dy = event.y - startY
-                if (kotlin.math.abs(dx) > threshold && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.25f) {
-                    isHorizontalSwipe = true
-                    return true
+                val index = event.findPointerIndex(activePointerId)
+                if (index < 0) {
+                    resetGesture()
+                } else {
+                    pendingDirection = gesture.move(event.getX(index), event.getY(index))
+                    if (pendingDirection != null) return true
                 }
             }
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (event.getPointerId(event.actionIndex) == activePointerId) {
+                    val replacement = if (event.actionIndex == 0) 1 else 0
+                    if (replacement < event.pointerCount) {
+                        activePointerId = event.getPointerId(replacement)
+                        gesture.begin(event.getX(replacement), event.getY(replacement))
+                        pendingDirection = null
+                    } else resetGesture()
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                val index = event.findPointerIndex(activePointerId).takeIf { it >= 0 } ?: event.actionIndex
+                pendingDirection = gesture.finish(event.getX(index), event.getY(index))
+                activePointerId = MotionEvent.INVALID_POINTER_ID
+                if (pendingDirection != null) return true
+            }
+            MotionEvent.ACTION_CANCEL -> resetGesture()
         }
         return super.onInterceptTouchEvent(event)
     }
 
+    /** Keep observing child sequences, but only take over after decisive horizontal intent. */
+    override fun requestDisallowInterceptTouchEvent(disallowIntercept: Boolean) {
+        super.requestDisallowInterceptTouchEvent(false)
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_UP) {
-            if (isHorizontalSwipe) onSwipe(event.x > startX) else performClick()
-            isHorizontalSwipe = false
-            return true
+        when (event.actionMasked) {
+            MotionEvent.ACTION_UP -> {
+                val index = event.findPointerIndex(activePointerId).takeIf { it >= 0 } ?: event.actionIndex
+                val direction = pendingDirection ?: gesture.finish(event.getX(index), event.getY(index))
+                if (direction != null) onSwipe(direction == WorkspaceSwipeDirection.RIGHT)
+                else performClick()
+                resetGesture()
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                resetGesture()
+                return true
+            }
         }
-        if (event.actionMasked == MotionEvent.ACTION_CANCEL) isHorizontalSwipe = false
         return true
+    }
+
+    private fun resetGesture() {
+        gesture.cancel()
+        activePointerId = MotionEvent.INVALID_POINTER_ID
+        pendingDirection = null
     }
 
     override fun performClick(): Boolean {

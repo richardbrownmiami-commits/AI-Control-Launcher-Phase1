@@ -29,13 +29,17 @@ class ThemeSpecTest {
             assertTrue(values.iconStyle in ThemeSpec.iconStyles)
             assertTrue(values.backgroundStyle in ThemeSpec.backgroundStyles)
             assertTrue(values.layout in ThemeSpec.layouts)
-            assertNull(values.wallpaperAsset)
+            assertNotNull("Preset $name should reference a bundled wallpaper", values.wallpaperAsset)
+            assertTrue(values.wallpaperAsset in setOf(
+                "commons_abstract_blue.jpg", "commons_abstract_warm.jpg", "commons_abstract_sage.jpg"
+            ))
         }
     }
 
     @Test
     fun spiderInspiredThemeUsesAnAbstractPaletteAndWallpaperSearchPhrase() {
         val values = ThemeSpec.suggestedPalette("Spider-Man")
+        assertEquals("Spider-Inspired", values.name)
         assertEquals("#E62429", values.accent)
         assertEquals("dense", values.layout)
         assertTrue(ThemeSpec.suggestedWallpaperQuery(values.name).contains("abstract"))
@@ -52,6 +56,12 @@ class ThemeSpecTest {
         assertEquals("wallpaper_1.webp", values.wallpaperAsset)
         assertEquals("mail.png", values.iconAssets["com.example.mail"])
         assertEquals("com.example.icons", values.iconPackPackage)
+    }
+
+    @Test
+    fun genericValidationCanStillRepresentAnExplicitPaletteOnlyTheme() {
+        assertNull(ThemeSpec.validate("Palette only").wallpaperAsset)
+        assertEquals("commons_abstract_blue.jpg", ThemeSpec.suggestedPalette("Ocean test").wallpaperAsset)
     }
 
     @Test(expected = IllegalArgumentException::class)

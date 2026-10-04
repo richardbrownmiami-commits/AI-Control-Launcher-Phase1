@@ -37,6 +37,19 @@ class AiPlanValidatorTest {
         assertTrue(decision.plan.actions.single() is AiLauncherAction.SearchAssets)
     }
 
+    @Test
+    fun copyrightedThemeNamesBecomeAccuratelyLabeledInspiredPalettes() {
+        val decision = AiPlanValidator.parse(
+            """{"message":"An abstract superhero palette","theme":{"operation":"CREATE","name":"Spider-Man"},"actions":[]}""",
+            themes
+        ) as AiPlanDecision.Review
+        val created = decision.plan.theme as AiThemeOperation.Create
+        assertEquals("Spider-Inspired", created.values.name)
+        val search = decision.plan.actions.single() as AiLauncherAction.SearchAssets
+        assertFalse(search.query.contains("Spider-Man", ignoreCase = true))
+        assertTrue(search.query.contains("abstract", ignoreCase = true))
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun rejectsSearchQueriesThatNameCharacterArt() {
         AiPlanValidator.parse(
@@ -127,6 +140,30 @@ class AiPlanValidatorTest {
         assertEquals("aurora", values.backgroundStyle)
         assertEquals("wide", values.layout)
         assertEquals("org.example.monominimal", values.iconPackPackage)
+    }
+
+    @Test
+    fun createThemeWithoutAssetActionGetsAConservativeBundleSearch() {
+        val decision = AiPlanValidator.parse(
+            """{"message":"A complete ocean theme","theme":{"operation":"CREATE","name":"Ocean night"},"actions":[]}""",
+            themes
+        ) as AiPlanDecision.Review
+        val created = decision.plan.theme as AiThemeOperation.Create
+        assertEquals("commons_abstract_blue.jpg", created.values.wallpaperAsset)
+        val search = decision.plan.actions.single() as AiLauncherAction.SearchAssets
+        assertTrue(search.query.contains("abstract"))
+    }
+
+    @Test
+    fun explicitColorsOnlyRequestHasNoWallpaperOrSearchSideEffect() {
+        val decision = AiPlanValidator.parse(
+            """{"message":"Palette only","theme":{"operation":"CREATE","name":"Soft dusk"},"actions":[]}""",
+            themes,
+            promptContext = "Make a palette only, colors only, no wallpaper"
+        ) as AiPlanDecision.Review
+        val created = decision.plan.theme as AiThemeOperation.Create
+        assertNull(created.values.wallpaperAsset)
+        assertTrue(decision.plan.actions.isEmpty())
     }
 
     @Test(expected = IllegalArgumentException::class)

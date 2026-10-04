@@ -44,7 +44,8 @@ object AiPlanValidator {
     fun parse(
         raw: String,
         availableThemes: Set<String>,
-        availableIconPacks: Map<String, String> = emptyMap()
+        availableIconPacks: Map<String, String> = emptyMap(),
+        promptContext: String? = null
     ): AiPlanDecision {
         require(raw.length <= MAX_RESPONSE_CHARS) { "AI response is too large to review safely." }
         val root = parseResponseObject(raw)
@@ -61,8 +62,17 @@ object AiPlanValidator {
             return AiPlanDecision.Clarification(message, clarification)
         }
 
-        val theme = themeObject?.let { parseTheme(it, availableThemes, availableIconPacks) }
-        val actions = parseActions(actionArray, availableIconPacks)
+        val paletteOnly = promptContext?.let(ThemeSpec::isPaletteOnlyRequest) == true
+        val theme = themeObject?.let { parseTheme(it, availableThemes, availableIconPacks, !paletteOnly) }
+        val actions = parseActions(actionArray, availableIconPacks).toMutableList()
+        if (paletteOnly) actions.removeAll { it is AiLauncherAction.SearchAssets }
+        val created = theme as? AiThemeOperation.Create
+        if (created != null && !paletteOnly && actions.none {
+                it is AiLauncherAction.SearchAssets || it === AiLauncherAction.AddWidget || it === AiLauncherAction.BrowseIconPacks
+            }) {
+            require(actions.size < 3) { "A complete theme bundle needs one available plan action; review the theme separately from other changes." }
+            actions.add(0, AiLauncherAction.SearchAssets(ThemeSpec.suggestedWallpaperQuery(created.values.name)))
+        }
         if (theme == null && actions.isEmpty()) return AiPlanDecision.Conversation(message)
         return AiPlanDecision.Review(AiLauncherPlan(message, theme, actions))
     }
@@ -70,7 +80,8 @@ object AiPlanValidator {
     private fun parseTheme(
         value: JSONObject,
         availableThemes: Set<String>,
-        availableIconPacks: Map<String, String>
+        availableIconPacks: Map<String, String>,
+        includeBundledWallpaper: Boolean
     ): AiThemeOperation {
         val operation = requiredString(value, "operation", 20).uppercase()
         return when (operation) {
@@ -85,7 +96,7 @@ object AiPlanValidator {
                 val suggested = ThemeSpec.suggestedPalette(name)
                 AiThemeOperation.Create(
                     ThemeSpec.validate(
-                        name = name,
+                        name = ThemeSpec.safeThemeDisplayName(name),
                         background = optionalString(value, "background", 20) ?: suggested.background,
                         accent = optionalString(value, "accent", 20) ?: suggested.accent,
                         accent2 = optionalString(value, "accent2", 20) ?: suggested.accent2,
@@ -95,6 +106,7 @@ object AiPlanValidator {
                         iconStyle = optionalString(value, "iconStyle", 20) ?: suggested.iconStyle,
                         backgroundStyle = optionalString(value, "backgroundStyle", 20) ?: suggested.backgroundStyle,
                         layout = optionalString(value, "layout", 20) ?: suggested.layout,
+                        wallpaperAsset = if (includeBundledWallpaper) suggested.wallpaperAsset else null,
                         iconPackPackage = optionalString(value, "iconPack", 120)?.let { requestedPack ->
                             availableIconPacks.entries.firstOrNull {
                                 it.key.equals(requestedPack, ignoreCase = true) || it.value.equals(requestedPack, ignoreCase = true)

@@ -22,6 +22,7 @@ import com.aicontrol.launcher.assets.ThemeBundleBuilder
 import com.aicontrol.launcher.assets.ThemeBundleBuildResult
 import com.aicontrol.launcher.assets.WallpaperCandidate
 import com.aicontrol.launcher.apps.AppRepository
+import com.aicontrol.launcher.theme.ThemeSpec
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +45,7 @@ class AssetsActivity : Activity() {
     private lateinit var manager: LauncherAssetManager
     private lateinit var engine: ActionEngine
     private lateinit var appRepository: AppRepository
+    private lateinit var previewAssets: ThemePreviewAssets
     private lateinit var list: LinearLayout
     private lateinit var searchProgress: ProgressBar
     private lateinit var searchProgressLabel: TextView
@@ -61,6 +63,7 @@ class AssetsActivity : Activity() {
         catalog = AssetCatalog(this)
         manager = LauncherAssetManager(this)
         appRepository = AppRepository(this)
+        previewAssets = ThemePreviewAssets(this, engine, appRepository)
         pendingThemeName = intent.getStringExtra(EXTRA_THEME_NAME)?.takeIf { it.isNotBlank() }
         buildUi()
         intent.getStringExtra(EXTRA_SUGGESTED_QUERY)?.takeIf { it.isNotBlank() }?.let { query ->
@@ -95,7 +98,7 @@ class AssetsActivity : Activity() {
                 setTextColor(UiTheme.textPrimary)
             })
             addView(TextView(this@AssetsActivity).apply {
-                text = pendingThemeName?.let { "Building assets for $it" } ?: "Your private visual library"
+                text = pendingThemeName?.let { "Commons wallpaper + automatic OpenMoji icons · $it" } ?: "Your private visual library"
                 textSize = 11f
                 setTextColor(UiTheme.textMuted)
             })
@@ -107,7 +110,7 @@ class AssetsActivity : Activity() {
             setPadding(dp(13), dp(11), dp(13), dp(11))
             UiTheme.styleCard(this, UiTheme.card, false)
             addView(TextView(this@AssetsActivity).apply {
-                text = pendingThemeName?.let { "Add a wallpaper or app icon to this theme draft." }
+                text = pendingThemeName?.let { "Build a complete wallpaper-and-icon bundle, then preview the saved files before applying." }
                     ?: "Import an image you choose, or search for reusable wallpaper. Preview before applying."
                 textSize = 13f
                 typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
@@ -121,6 +124,8 @@ class AssetsActivity : Activity() {
             })
         }
         root.addView(intro, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7); bottomMargin = dp(8) })
+        root.addView(actionButton("Asset sources & licenses") { AssetSourcesDialog.show(this) },
+            LinearLayout.LayoutParams(-1, dp(42)).apply { bottomMargin = dp(7) })
 
         val buttons = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         buttons.addView(actionButton("Import image") { pickLocalImage() }, LinearLayout.LayoutParams(0, dp(48), 1f))
@@ -130,11 +135,8 @@ class AssetsActivity : Activity() {
         }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(7) })
         root.addView(buttons)
         if (pendingThemeName != null) {
-            root.addView(actionButton("Find open-license icon art") {
-                val query = com.aicontrol.launcher.theme.ThemeSpec.suggestedWallpaperQuery(pendingThemeName!!)
-                    .replace("wallpaper", "minimal app icon")
-                askWallpaperQuery(query)
-            }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(6) })
+            root.addView(actionButton("OpenMoji icon source & license") { AssetSourcesDialog.show(this) },
+                LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(6) })
         }
         searchRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
@@ -375,10 +377,35 @@ class AssetsActivity : Activity() {
     }
 
     private fun showThemeBundlePreview(result: ThemeBundleBuildResult) {
-        val values = pendingThemeName?.let { engine.themeValues(it) } ?: return
+        val targetName = pendingThemeName ?: return
+        val values = runCatching { engine.themeValues(targetName) }.getOrElse {
+            AlertDialog.Builder(this).setTitle("Theme bundle could not be read")
+                .setMessage("The theme JSON was not readable after asset creation. No complete theme is being reported or applied. ${it.message ?: ""}")
+                .setPositiveButton("Keep draft", null).show()
+            return
+        }
+        val savedWallpaper = values.wallpaperAsset?.let { AssetStore(this).wallpaper(it) }
+        val wallpaperWasSaved = runCatching {
+            val savedFile = requireNotNull(savedWallpaper)
+            require(result.wallpaperFile.isFile && savedFile.canonicalFile == result.wallpaperFile.canonicalFile)
+            ImageAssetValidation.validate(savedFile)
+            true
+        }.getOrDefault(false)
+        if (!wallpaperWasSaved) {
+            AlertDialog.Builder(this).setTitle("Wallpaper was not committed to the theme")
+                .setMessage("The downloaded file and saved theme did not match, so this bundle is not complete and cannot be applied. Keep the palette as a draft or retry the build.")
+                .setPositiveButton("Retry") { _, _ -> buildThemeBundle(ThemeSpec.suggestedWallpaperQuery(targetName)) }
+                .setNegativeButton("Keep draft", null).show()
+            return
+        }
         val builderNotes = buildList {
             add("Wallpaper: ${result.wallpaper.title} (${result.wallpaper.license})")
-            add("Matching OpenMoji app icons prepared: ${result.iconMappings.size}")
+            val savedIcons = result.iconMappings.count { assignment ->
+                engine.themeIconFile(targetName, assignment.packageName)?.let { file ->
+                    runCatching { ImageAssetValidation.validate(file) }.isSuccess
+                } == true
+            }
+            add("OpenMoji app icons saved and checked: $savedIcons of ${result.iconMappings.size}")
             result.iconMappings.take(12).forEach { add("${it.appLabel} → ${it.glyph.annotation}") }
             if (result.iconMappings.size > 12) add("…and ${result.iconMappings.size - 12} more mappings")
             addAll(result.warnings)
@@ -396,15 +423,20 @@ class AssetsActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(17), dp(6), dp(17), dp(10))
         }
-        val wallpaper = values.wallpaperAsset?.let { AssetStore(this).wallpaper(it) }
-        val bitmap = wallpaper?.takeIf { it.isFile }?.let { ImageAssetValidation.decodeSampled(it, 1200) }
-        if (bitmap != null) body.addView(ImageView(this).apply {
-            setImageBitmap(bitmap)
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            contentDescription = "Preview of ${values.name} theme wallpaper"
-        }, LinearLayout.LayoutParams(-1, dp(180)))
+        val wallpaper = previewAssets.wallpaper(values, 180)
+        if (wallpaper != null) body.addView(wallpaper)
+        else body.addView(TextView(this).apply {
+            text = if (values.wallpaperAsset == null) "Palette-only theme · no wallpaper requested" else "Wallpaper image is missing or unreadable · rebuild before applying"
+            textSize = 11f
+            setTextColor(UiTheme.textMuted)
+            setPadding(0, dp(10), 0, dp(6))
+        })
+        body.addView(previewAssets.iconStrip(values, maxIcons = 6, iconSizeDp = 42),
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
         body.addView(TextView(this).apply {
-            text = "${values.layout.uppercase()} layout · ${values.style} cards · ${values.iconStyle} icon shape · ${values.iconAssets.size} custom app-icon mappings${values.iconPackPackage?.let { " · installed pack: $it" } ?: ""}"
+            text = "${values.layout.uppercase()} layout · ${values.style} cards · ${values.iconStyle} icon shape · " +
+                (if (values.iconAssets.isEmpty()) "known app labels use OpenMoji" else "${values.iconAssets.size} saved app-icon mappings") +
+                (values.iconPackPackage?.let { " · installed pack: $it" } ?: "")
             textSize = 12f
             setTextColor(UiTheme.textPrimary)
             setPadding(0, dp(9), 0, dp(6))
@@ -422,9 +454,25 @@ class AssetsActivity : Activity() {
         values.iconAssets.values.distinct().forEach { assetName ->
             catalog.anyAttribution(assetName)?.let { if (it !in records) records += it }
         }
+        if (values.iconAssets.isNotEmpty() || values.wallpaperAsset != null) {
+            catalog.anyAttribution("openmoji_1f4f7.png")?.let { if (it !in records) records += it }
+        }
+        val iconsAreReadable = values.iconAssets.keys.all { packageName ->
+            engine.themeIconFile(targetName, packageName)?.let { file ->
+                runCatching { ImageAssetValidation.validate(file) }.isSuccess
+            } == true
+        }
+        val wallpaperIsReadable = values.wallpaperAsset == null || wallpaper != null
+        val canApplyCompleteBundle = iconsAreReadable && wallpaperIsReadable
+        if (!canApplyCompleteBundle) body.addView(TextView(this).apply {
+            text = "Some files referenced by this theme are missing or unreadable. Re-build the bundle before applying it."
+            textSize = 11f
+            setTextColor(UiTheme.accent)
+            setPadding(0, dp(8), 0, dp(2))
+        })
         val notes = buildList {
             if (buildNotes.isNotEmpty()) addAll(buildNotes)
-            else add("Saved app-icon mappings: ${values.iconAssets.size}. Unmapped apps keep their installed icons.")
+            else add("Saved app-icon mappings: ${values.iconAssets.size}. Known labels use OpenMoji; other apps keep their installed icons.")
             if (records.isNotEmpty()) {
                 add("")
                 add("ATTRIBUTION")
@@ -449,18 +497,21 @@ class AssetsActivity : Activity() {
             .setTitle("Preview complete theme · ${values.name}")
             .setView(scroll)
             .setNegativeButton("Keep as draft", null)
-            .setPositiveButton("Apply complete theme", null)
+            .setPositiveButton(if (canApplyCompleteBundle) "Apply complete theme" else "Bundle incomplete", null)
             .create()
         dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                runCatching {
-                    engine.setTheme(targetName)
-                    UiTheme.bind(engine)
-                    Toast.makeText(this, "${values.name} applied to this launcher", Toast.LENGTH_LONG).show()
-                    dialog.dismiss()
-                    finish()
-                }.onFailure {
-                    Toast.makeText(this, it.message ?: "Could not apply theme", Toast.LENGTH_LONG).show()
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
+                isEnabled = canApplyCompleteBundle
+                setOnClickListener {
+                    runCatching {
+                        engine.setTheme(targetName)
+                        UiTheme.bind(engine)
+                        Toast.makeText(this@AssetsActivity, "${values.name} applied to this launcher", Toast.LENGTH_LONG).show()
+                        dialog.dismiss()
+                        finish()
+                    }.onFailure {
+                        Toast.makeText(this@AssetsActivity, it.message ?: "Could not apply theme", Toast.LENGTH_LONG).show()
+                    }
                 }
             }
         }

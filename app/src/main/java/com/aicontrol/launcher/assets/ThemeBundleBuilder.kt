@@ -65,27 +65,47 @@ class ThemeBundleBuilder(context: Context) {
         onProgress: (String) -> Unit
     ): ThemeBundleBuildResult {
         if (!shouldContinue()) throw CancellationException("Theme asset search canceled.")
+        require(wallpaperQuery.trim().length in 3..120) { "Enter a search phrase between 3 and 120 characters." }
+        AssetSearchPolicy.validate(wallpaperQuery.trim())
         onProgress("Searching Wikimedia Commons for reuse-filtered wallpaper…")
-        val candidates = CreativeCommonsAssetSearch().search(wallpaperQuery, limit = 12)
-        val wallpaperCandidate = ThemeWallpaperSelector.choose(candidates, wallpaperQuery)
-            ?: error("No safe, reuse-filtered wallpaper with suitable image dimensions was found. The theme is still saved as a draft; try a broader abstract query.")
-        if (!shouldContinue()) throw CancellationException("Theme asset search canceled.")
-        onProgress("Downloading ‘${wallpaperCandidate.title}’ (${wallpaperCandidate.license})…")
-        val wallpaper = assets.downloadLicensedWallpaper(
-            wallpaperCandidate,
-            shouldContinue = shouldContinue,
-            onProgress = { downloaded, total ->
-                val percent = if (total > 0) " ${downloaded * 100 / total}%" else ""
-                onProgress("Saving licensed wallpaper$percent…")
+        val warnings = mutableListOf<String>()
+        val selected = try {
+            val candidates = CreativeCommonsAssetSearch().search(wallpaperQuery, limit = 12)
+            val candidate = ThemeWallpaperSelector.choose(candidates, wallpaperQuery)
+                ?: error("Commons returned no safe, reusable wallpaper for this query.")
+            if (!shouldContinue()) throw CancellationException("Theme asset search canceled.")
+            onProgress("Downloading ‘${candidate.title}’ (${candidate.license})…")
+            val file = assets.downloadLicensedWallpaper(
+                candidate,
+                shouldContinue = shouldContinue,
+                onProgress = { downloaded, total ->
+                    val percent = if (total > 0) " ${downloaded * 100 / total}%" else ""
+                    onProgress("Saving licensed wallpaper$percent…")
+                }
+            ).getOrThrow()
+            candidate to file
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            val bundled = BundledThemeAssets.forTheme(themeName)
+            val localFile = AssetStore(appContext).wallpaper(bundled.assetName)
+            require(localFile.isFile) {
+                "Commons is unavailable and the bundled CC0 wallpaper could not be read; the theme remains a draft. Check storage and retry."
             }
-        ).getOrThrow()
+            ImageAssetValidation.validate(localFile)
+            onProgress("Commons is unavailable; using the included CC0 wallpaper and continuing offline…")
+            val detail = error.message?.replace(Regex("[\\r\\n]+"), " ")?.take(100)
+            warnings += "Commons search/download unavailable${detail?.let { ": $it" } ?: ""}; used the included ${bundled.license} abstract wallpaper."
+            bundled.candidate() to localFile
+        }
+        val wallpaperCandidate = selected.first
+        val wallpaper = selected.second
         engine.linkThemeWallpaper(themeName, wallpaper)
 
         val assignments = mutableListOf<AppIconAssignment>()
-        val warnings = mutableListOf<String>()
         try {
-            onProgress("Finding matching, attribution-preserving OpenMoji icons on this device…")
-            val glyphs = openMoji.catalog()
+            onProgress("Matching installed app labels to locally bundled OpenMoji icons…")
+            val glyphs = openMoji.bundledCatalog()
             val matches = OpenMojiIconMatcher.assign(
                 glyphs,
                 apps.map { it.packageName to it.label },
@@ -97,7 +117,7 @@ class ThemeBundleBuilder(context: Context) {
             matches.forEachIndexed { index, match ->
                 if (!shouldContinue()) throw CancellationException("Theme asset search canceled.")
                 try {
-                    onProgress("Adding matching icon ${index + 1} of ${matches.size}: ${match.appLabel} · ${match.glyph.annotation}…")
+                    onProgress("Saving matching OpenMoji icon ${index + 1} of ${matches.size}: ${match.appLabel} · ${match.glyph.annotation}…")
                     val file = openMoji.download(match.glyph, shouldContinue) { onProgress(it) }
                     engine.linkThemeIcon(themeName, match.packageName, file)
                     assignments += match
@@ -110,7 +130,7 @@ class ThemeBundleBuilder(context: Context) {
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            warnings += "OpenMoji icons could not be added (${error.message ?: "catalog unavailable"}); unmapped apps keep their current icons."
+            warnings += "OpenMoji icons could not be saved (${error.message ?: "local asset unavailable"}); unmapped apps keep their current icons."
         }
         return ThemeBundleBuildResult(wallpaper, wallpaperCandidate, assignments, warnings.distinct())
     }

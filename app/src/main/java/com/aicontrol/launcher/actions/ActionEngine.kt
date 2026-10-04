@@ -4,8 +4,11 @@ import android.content.Context
 import android.graphics.Color
 import com.aicontrol.launcher.apps.AppRepository
 import com.aicontrol.launcher.assets.AssetStore
+import com.aicontrol.launcher.assets.ImageAssetValidation
 import com.aicontrol.launcher.assets.LauncherAssetManager
 import com.aicontrol.launcher.theme.ThemeSpec
+import java.io.File
+import java.io.FileOutputStream
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -166,9 +169,8 @@ class ActionEngine(context: Context) {
                 it.nameWithoutExtension != values.name
         }
         require(conflictingCustomName == null) { "A custom theme with the same name already exists; use the exact spelling to replace it." }
-        val data = themeJson(values)
         recordThemeForRollback()
-        store.themeFile(values.name).writeText(data.toString())
+        writeTheme(values)
         setTheme(values.name)
     }
 
@@ -184,7 +186,7 @@ class ActionEngine(context: Context) {
                 it.nameWithoutExtension.equals(checked.name, ignoreCase = true) && it.nameWithoutExtension != checked.name
         }
         require(conflictingCustomName == null) { "A custom theme with the same name already exists; use the exact spelling to replace it." }
-        store.themeFile(checked.name).writeText(themeJson(checked).toString())
+        writeTheme(checked)
     }
 
     /** Attach a verified image from the private library to a saved custom theme. */
@@ -220,13 +222,23 @@ class ActionEngine(context: Context) {
     }
 
     fun themeIconFile(themeName: String, packageName: String): java.io.File? {
-        val values = themeValues(themeName)
+        val values = runCatching { themeValues(themeName) }.getOrNull() ?: return null
         if (packageName !in values.iconAssets) return null
         return store.themeIcon(themeName, packageName).takeIf { it.isFile }
     }
 
     private fun writeTheme(values: ThemeSpec.Values) {
-        store.themeFile(values.name).writeText(themeJson(values).toString())
+        val target = store.themeFile(values.name)
+        val temporary = File(target.parentFile, target.name + ".tmp")
+        try {
+            FileOutputStream(temporary).use { stream ->
+                stream.write(themeJson(values).toString().toByteArray(Charsets.UTF_8))
+                stream.fd.sync()
+            }
+            if (!temporary.renameTo(target)) temporary.copyTo(target, overwrite = true)
+        } finally {
+            if (temporary.exists()) temporary.delete()
+        }
     }
 
     private fun addHidden(packageName: String) {
@@ -309,13 +321,20 @@ class ActionEngine(context: Context) {
         val requested = value.trim()
         require(availableThemes().any { it.equals(requested, ignoreCase = true) }) { "Unknown theme '$requested'" }
         val stored = availableThemes().first { it.equals(requested, ignoreCase = true) }
-        if (!theme().equals(stored, ignoreCase = true)) recordThemeForRollback()
         val values = themeValues(stored)
-        values.wallpaperAsset?.let { wallpaperName ->
-            val wallpaper = store.wallpaper(wallpaperName)
-            require(wallpaper.isFile) { "Theme wallpaper '$wallpaperName' is missing from the private asset library." }
-            assets.setLauncherWallpaper(wallpaper).getOrThrow()
+        values.iconAssets.keys.forEach { packageName ->
+            val icon = store.themeIcon(stored, packageName)
+            require(icon.isFile) { "Theme icon for $packageName is missing from the saved bundle; no theme changes were applied." }
+            ImageAssetValidation.validate(icon)
         }
+        val wallpaperFile = values.wallpaperAsset?.let { wallpaperName ->
+            store.wallpaper(wallpaperName).also { wallpaper ->
+                require(wallpaper.isFile) { "Theme wallpaper '$wallpaperName' is missing from the private asset library." }
+                ImageAssetValidation.validate(wallpaper)
+            }
+        }
+        if (!theme().equals(stored, ignoreCase = true)) recordThemeForRollback()
+        wallpaperFile?.let { assets.setLauncherWallpaper(it).getOrThrow() }
         prefs.edit().putString("theme", stored).putString("style", values.style).apply()
         setLayout(values.layout)
         values.iconPackPackage?.let { prefs.edit().putString("installed_icon_pack", it).apply() }
@@ -371,7 +390,8 @@ class ActionEngine(context: Context) {
                 iconStyle = snapshot.getString("iconStyle"),
                 backgroundStyle = snapshot.getString("backgroundStyle"),
                 layout = snapshot.optString("layout", ThemeSpec.DEFAULT_LAYOUT),
-                wallpaperAsset = snapshot.optString("wallpaperAsset").takeIf { it.isNotBlank() },
+                wallpaperAsset = snapshot.optString("wallpaperAsset").takeIf { it.isNotBlank() }
+                    ?: if (snapshot.optBoolean("paletteOnly", false)) null else ThemeSpec.bundledWallpaperAsset(name),
                 iconAssets = snapshot.optJSONObject("iconAssets")?.let { objectValue ->
                     buildMap { objectValue.keys().forEach { key -> put(key, objectValue.optString(key)) } }
                 } ?: emptyMap(),
@@ -416,15 +436,19 @@ class ActionEngine(context: Context) {
         .put("backgroundStyle", values.backgroundStyle)
         .put("layout", values.layout)
         .put("wallpaperAsset", values.wallpaperAsset ?: "")
+        .put("paletteOnly", values.wallpaperAsset == null)
         .put("iconPackPackage", values.iconPackPackage ?: "")
         .put("iconAssets", JSONObject().apply { values.iconAssets.forEach { (pkg, asset) -> put(pkg, asset) } })
 
     fun themeValues(name: String = theme()): ThemeSpec.Values {
         val customFile = store.themeFile(name)
-        if (customFile.isFile) return runCatching {
+        if (customFile.isFile) return try {
             val json = JSONObject(customFile.readText())
+            val storedName = json.optString("name", name)
+            val wallpaperAsset = json.optString("wallpaperAsset").takeIf { it.isNotBlank() }
+                ?: if (json.optBoolean("paletteOnly", false)) null else ThemeSpec.bundledWallpaperAsset(storedName)
             ThemeSpec.validate(
-                name = json.optString("name", name),
+                name = storedName,
                 background = json.optString("bg", ThemeSpec.DEFAULT_BACKGROUND),
                 accent = json.optString("accent", ThemeSpec.DEFAULT_ACCENT),
                 accent2 = json.optString("accent2", ThemeSpec.DEFAULT_ACCENT2),
@@ -434,13 +458,15 @@ class ActionEngine(context: Context) {
                 iconStyle = json.optString("iconStyle", ThemeSpec.DEFAULT_ICON_STYLE),
                 backgroundStyle = json.optString("backgroundStyle", ThemeSpec.DEFAULT_BACKGROUND_STYLE),
                 layout = json.optString("layout", ThemeSpec.DEFAULT_LAYOUT),
-                wallpaperAsset = json.optString("wallpaperAsset").takeIf { it.isNotBlank() },
+                wallpaperAsset = wallpaperAsset,
                 iconAssets = json.optJSONObject("iconAssets")?.let { objectValue ->
                     buildMap { objectValue.keys().forEach { key -> put(key, objectValue.optString(key)) } }
                 } ?: emptyMap(),
                 iconPackPackage = json.optString("iconPackPackage").takeIf { it.isNotBlank() }
             )
-        }.getOrElse { ThemeSpec.builtIn(name) ?: ThemeSpec.validate(name) }
+        } catch (error: Exception) {
+            throw IllegalArgumentException("Saved theme '$name' is damaged; its bundle was not applied.", error)
+        }
         return ThemeSpec.builtIn(name) ?: ThemeSpec.validate(name)
     }
 

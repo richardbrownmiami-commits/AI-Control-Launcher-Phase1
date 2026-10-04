@@ -4,6 +4,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
+import com.aicontrol.launcher.R
 import org.json.JSONArray
 
 data class OpenMojiGlyph(
@@ -18,6 +19,29 @@ data class OpenMojiGlyph(
 }
 
 data class AppIconAssignment(val packageName: String, val appLabel: String, val glyph: OpenMojiGlyph)
+
+/** Small, locally bundled OpenMoji subset for common launcher labels; images are unmodified. */
+object BundledOpenMojiCatalog {
+    val glyphs = listOf(
+        OpenMojiGlyph("1F4F1", "mobile phone", "cell communication mobile phone telephone", ""),
+        OpenMojiGlyph("1F5E8", "left speech bubble", "balloon bubble dialog left speech message sms talk text", ""),
+        OpenMojiGlyph("1F4F7", "camera", "camera photo selfie snap video", ""),
+        OpenMojiGlyph("1F4C5", "calendar", "calendar date schedule", ""),
+        OpenMojiGlyph("23F0", "alarm clock", "alarm clock time", ""),
+        OpenMojiGlyph("1F4E7", "e-mail", "email mail letter", ""),
+        OpenMojiGlyph("1F310", "globe with meridians", "earth globe internet web world", ""),
+        OpenMojiGlyph("1F5FA", "world map", "map world navigation", ""),
+        OpenMojiGlyph("1F464", "bust in silhouette", "contacts people silhouette", ""),
+        OpenMojiGlyph("2699", "gear", "cog cogwheel settings tool", ""),
+        OpenMojiGlyph("1F4C1", "file folder", "file folder storage", ""),
+        OpenMojiGlyph("1F3B5", "musical note", "audio music musical note sound", ""),
+        OpenMojiGlyph("1F6CD", "shopping bags", "market shop store shopping", ""),
+        OpenMojiGlyph("1F324", "sun behind small cloud", "cloud forecast sun weather", ""),
+        OpenMojiGlyph("1F9EE", "abacus", "calculation calculator numbers", ""),
+        OpenMojiGlyph("1F4DD", "memo", "memo notes notepad pencil", ""),
+        OpenMojiGlyph("1F578", "spider web", "abstract browser web", "")
+    )
+}
 
 /** Local-only mapping from app labels to generic OpenMoji symbols; no installed-app inventory is sent online. */
 object OpenMojiIconMatcher {
@@ -46,36 +70,62 @@ object OpenMojiIconMatcher {
         Slot(Regex("\\b(notes?|memo|notepad)\\b", RegexOption.IGNORE_CASE), listOf("1F4DD", "1F5D2"), listOf("memo", "spiral notepad"))
     )
 
-    fun assign(glyphs: List<OpenMojiGlyph>, apps: List<Pair<String, String>>, themeName: String): List<AppIconAssignment> {
+    fun bestGlyph(glyphs: List<OpenMojiGlyph>, label: String, themeName: String): OpenMojiGlyph? {
         val available = glyphs.filter { it.code.matches(Regex("[0-9A-F-]{4,40}")) }
             .filterNot { it.code.contains("-1F3FB") || it.code.contains("-1F3FC") || it.code.contains("-1F3FD") || it.code.contains("-1F3FE") || it.code.contains("-1F3FF") }
             .associateBy { it.code }
-        val chosen = linkedMapOf<String, AppIconAssignment>()
-        apps.distinctBy { it.first }.forEach { (packageName, label) ->
-            val slot = slots.firstOrNull { it.labelPattern.containsMatchIn(label) } ?: return@forEach
-            val isWebCategory = slot.labelPattern.containsMatchIn("browser") || slot.labelPattern.containsMatchIn("web")
-            val preferred = if (themeName.contains("spider", ignoreCase = true) && isWebCategory) listOf("1F578") + slot.preferredCodes else slot.preferredCodes
-            val glyph = preferred.firstNotNullOfOrNull { code -> available[code] }
-                ?: available.values.firstOrNull { candidate ->
-                    slot.annotationHints.any { hint -> candidate.annotation.equals(hint, ignoreCase = true) || hint in candidate.searchableText() }
-                }
-                ?: return@forEach
-            chosen[packageName] = AppIconAssignment(packageName, label, glyph)
-        }
-        return chosen.values.toList()
+        val slot = slots.firstOrNull { it.labelPattern.containsMatchIn(label) } ?: return null
+        val isWebCategory = slot.labelPattern.containsMatchIn("browser") || slot.labelPattern.containsMatchIn("web")
+        val preferred = if (themeName.contains("spider", ignoreCase = true) && isWebCategory) listOf("1F578") + slot.preferredCodes else slot.preferredCodes
+        return preferred.firstNotNullOfOrNull { code -> available[code] }
+            ?: available.values.firstOrNull { candidate ->
+                slot.annotationHints.any { hint -> candidate.annotation.equals(hint, ignoreCase = true) || hint in candidate.searchableText() }
+            }
     }
+
+    fun assign(glyphs: List<OpenMojiGlyph>, apps: List<Pair<String, String>>, themeName: String): List<AppIconAssignment> =
+        apps.distinctBy { it.first }.mapNotNull { (packageName, label) ->
+            bestGlyph(glyphs, label, themeName)?.let { AppIconAssignment(packageName, label, it) }
+        }
 }
 
 /** Fetches a bounded official catalog and original, unmodified 72px PNGs with attribution. */
 class OpenMojiIconLibrary(context: android.content.Context) {
+    private val appContext = context.applicationContext
     private val store = AssetStore(context)
     private val downloader = ImageDownloader()
     private val attributionStore = AssetAttributionStore(context)
     private val catalogFile = File(store.cache, "openmoji-catalog.json")
     private val catalogUrl = "https://raw.githubusercontent.com/hfg-gmuend/openmoji/master/data/openmoji.json"
     private val licenseUrl = "https://creativecommons.org/licenses/by-sa/4.0/"
+    private val bundledResourceIds = mapOf(
+        "1F4F1" to R.drawable.openmoji_1f4f1,
+        "1F5E8" to R.drawable.openmoji_1f5e8,
+        "1F4F7" to R.drawable.openmoji_1f4f7,
+        "1F4C5" to R.drawable.openmoji_1f4c5,
+        "23F0" to R.drawable.openmoji_23f0,
+        "1F4E7" to R.drawable.openmoji_1f4e7,
+        "1F310" to R.drawable.openmoji_1f310,
+        "1F5FA" to R.drawable.openmoji_1f5fa,
+        "1F464" to R.drawable.openmoji_1f464,
+        "2699" to R.drawable.openmoji_2699,
+        "1F4C1" to R.drawable.openmoji_1f4c1,
+        "1F3B5" to R.drawable.openmoji_1f3b5,
+        "1F6CD" to R.drawable.openmoji_1f6cd,
+        "1F324" to R.drawable.openmoji_1f324,
+        "1F9EE" to R.drawable.openmoji_1f9ee,
+        "1F4DD" to R.drawable.openmoji_1f4dd,
+        "1F578" to R.drawable.openmoji_1f578
+    )
+
+    fun bundledCatalog(): List<OpenMojiGlyph> = BundledOpenMojiCatalog.glyphs
 
     fun catalog(): List<OpenMojiGlyph> {
+        val remote = runCatching { loadRemoteCatalog() }.getOrDefault(emptyList())
+        return (remote + bundledCatalog()).distinctBy { it.code }
+    }
+
+    private fun loadRemoteCatalog(): List<OpenMojiGlyph> {
         if (!catalogFile.isFile || System.currentTimeMillis() - catalogFile.lastModified() > 7L * 24 * 60 * 60 * 1000) {
             val source = URL(catalogUrl)
             require(source.protocol == "https" && source.host == "raw.githubusercontent.com") { "OpenMoji catalog host is not approved." }
@@ -131,12 +181,24 @@ class OpenMojiIconLibrary(context: android.content.Context) {
         val cachedValid = target.isFile && target.length() <= 512 * 1024 &&
             runCatching { ImageAssetValidation.validate(target) }.isSuccess
         if (!cachedValid) {
-            onProgress("Downloading ${glyph.annotation} icon from OpenMoji…")
             target.delete()
-            downloader.download(
-                glyph.imageUrl(), target, maxBytes = 512 * 1024,
-                allowedHosts = setOf("raw.githubusercontent.com"), shouldContinue = shouldContinue
-            ).getOrThrow()
+            val bundledId = bundledResourceIds[glyph.code.uppercase(Locale.ROOT)]
+            if (bundledId != null) {
+                if (!shouldContinue()) throw java.util.concurrent.CancellationException("Icon copy canceled.")
+                val temporary = File(target.parentFile, target.name + ".tmp")
+                temporary.delete()
+                appContext.resources.openRawResource(bundledId).use { input -> temporary.outputStream().use(input::copyTo) }
+                require(temporary.length() in 1..512L * 1024L) { "Bundled OpenMoji image exceeded the local asset limit." }
+                ImageAssetValidation.validate(temporary)
+                if (!temporary.renameTo(target)) temporary.copyTo(target, overwrite = true)
+                temporary.delete()
+            } else {
+                onProgress("Downloading ${glyph.annotation} icon from OpenMoji…")
+                downloader.download(
+                    glyph.imageUrl(), target, maxBytes = 512 * 1024,
+                    allowedHosts = setOf("raw.githubusercontent.com"), shouldContinue = shouldContinue
+                ).getOrThrow()
+            }
         }
         attributionStore.record(AssetAttribution(
             type = "image",
@@ -148,5 +210,10 @@ class OpenMojiIconLibrary(context: android.content.Context) {
             sourceUrl = glyph.attributionPage()
         ))
         return target
+    }
+
+    fun bundledIconFile(label: String, themeName: String): File? {
+        val glyph = OpenMojiIconMatcher.bestGlyph(bundledCatalog(), label, themeName) ?: return null
+        return runCatching { download(glyph) }.getOrNull()
     }
 }

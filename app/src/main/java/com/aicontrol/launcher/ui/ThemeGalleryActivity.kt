@@ -14,14 +14,14 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.aicontrol.launcher.actions.ActionEngine
+import com.aicontrol.launcher.apps.AppRepository
 import com.aicontrol.launcher.assets.AssetAttributionStore
-import com.aicontrol.launcher.assets.AssetStore
-import com.aicontrol.launcher.assets.ImageAssetValidation
 import com.aicontrol.launcher.theme.ThemeSpec
 
 @SuppressLint("SetTextI18n")
 class ThemeGalleryActivity : Activity() {
     private lateinit var engine: ActionEngine
+    private lateinit var previewAssets: ThemePreviewAssets
     private lateinit var list: LinearLayout
     private lateinit var screenRoot: LinearLayout
     private lateinit var undoButton: Button
@@ -30,6 +30,7 @@ class ThemeGalleryActivity : Activity() {
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         engine = ActionEngine(this)
+        previewAssets = ThemePreviewAssets(this, engine, AppRepository(this))
         UiTheme.bind(engine)
         build()
     }
@@ -91,6 +92,13 @@ class ThemeGalleryActivity : Activity() {
             setOnClickListener { startActivity(android.content.Intent(this@ThemeGalleryActivity, AssetsActivity::class.java)) }
         }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(7) })
         screenRoot.addView(toolbar)
+        screenRoot.addView(Button(this).apply {
+            text = "Asset sources & licenses"
+            textSize = 10f
+            setTextColor(UiTheme.textPrimary)
+            background = UiTheme.rounded(UiTheme.card2, 14f)
+            setOnClickListener { AssetSourcesDialog.show(this@ThemeGalleryActivity) }
+        }, LinearLayout.LayoutParams(-1, dp(40)).apply { topMargin = dp(5) })
         list = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val scroll = ScrollView(this).apply { clipToPadding = false; isFillViewport = false }
         scroll.addView(list)
@@ -122,7 +130,15 @@ class ThemeGalleryActivity : Activity() {
                 galleryRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
                 list.addView(galleryRow, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(3) })
             }
-            val values = engine.themeValues(name)
+            val values = runCatching { engine.themeValues(name) }.getOrElse { error ->
+                list.addView(TextView(this).apply {
+                    text = "$name could not be read: ${error.message ?: "saved bundle damaged"}"
+                    textSize = 11f
+                    setTextColor(UiTheme.textMuted)
+                    setPadding(dp(8), dp(8), dp(8), dp(8))
+                })
+                return@forEachIndexed
+            }
             val themeBg = Color.parseColor(values.background)
             val themeAccent = Color.parseColor(values.accent)
             val themeAccent2 = Color.parseColor(values.accent2)
@@ -172,34 +188,20 @@ class ThemeGalleryActivity : Activity() {
                 setTextColor(contrast(values.background))
             })
             preview.addView(sampleTop)
-            val wallpaper = values.wallpaperAsset?.let { AssetStore(this).wallpaper(it) }
-            val bitmap = wallpaper?.takeIf { it.isFile }?.let { ImageAssetValidation.decodeSampled(it, 800) }
-            if (bitmap != null) preview.addView(ImageView(this).apply {
-                setImageBitmap(bitmap)
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                contentDescription = "${name} wallpaper preview"
-                clipToOutline = true
-                background = UiTheme.rounded(themeCard, 12f)
-            }, LinearLayout.LayoutParams(-1, dp(62)).apply { topMargin = dp(5) })
+            val wallpaperPreview = previewAssets.wallpaper(values, 62)
+            if (wallpaperPreview != null) preview.addView(wallpaperPreview, LinearLayout.LayoutParams(-1, dp(62)).apply { topMargin = dp(5) })
+            else if (values.wallpaperAsset != null) preview.addView(TextView(this).apply {
+                text = "Wallpaper file unavailable · re-build this theme before applying"
+                textSize = 9f
+                setTextColor(UiTheme.textMuted)
+            }, LinearLayout.LayoutParams(-1, dp(34)).apply { topMargin = dp(5) })
             val sample = LinearLayout(this).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(5), dp(5), dp(5), dp(5))
                 background = UiTheme.rounded(themeCard, 14f)
             }
-            listOf("•", "•", "•").forEachIndexed { index, dot ->
-                sample.addView(TextView(this@ThemeGalleryActivity).apply {
-                    text = dot
-                    textSize = 12f
-                    gravity = Gravity.CENTER
-                    background = UiTheme.rounded(if (index % 2 == 0) themeAccent else themeAccent2, 12f)
-                    setTextColor(contrast(if (index % 2 == 0) values.accent else values.accent2))
-                }, LinearLayout.LayoutParams(dp(23), dp(23)).apply { rightMargin = dp(4) })
-            }
-            sample.addView(TextView(this@ThemeGalleryActivity).apply {
-                text = "Apps · Dock"
-                textSize = 9f
-                setTextColor(contrast(values.card))
-            })
+            sample.addView(previewAssets.iconStrip(values, maxIcons = 4, iconSizeDp = 25),
+                LinearLayout.LayoutParams(-1, -2))
             preview.addView(sample, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
             card.addView(preview, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(9) })
 
@@ -216,7 +218,8 @@ class ThemeGalleryActivity : Activity() {
             }
             card.addView(swatches)
             card.addView(TextView(this).apply {
-                text = "${values.layout.replaceFirstChar { it.uppercase() }} layout · ${values.iconStyle} icons · ${values.iconAssets.size} custom app icons" +
+                text = "${values.layout.replaceFirstChar { it.uppercase() }} layout · ${values.iconStyle} icons · " +
+                    (if (values.iconAssets.isEmpty()) "known app icons auto-mapped" else "${values.iconAssets.size} saved app icons") +
                     (if (values.iconPackPackage != null) " · installed pack" else "")
                 textSize = 9f
                 typeface = fontFor(values.typography)
@@ -273,21 +276,23 @@ class ThemeGalleryActivity : Activity() {
             typeface = fontFor(values.typography)
             setTextColor(primary)
         })
-        val wallpaper = values.wallpaperAsset?.let { AssetStore(this).wallpaper(it) }
-        val wallpaperBitmap = wallpaper?.takeIf { it.isFile }?.let { ImageAssetValidation.decodeSampled(it, 1000) }
-        if (wallpaperBitmap != null) preview.addView(ImageView(this).apply {
-            setImageBitmap(wallpaperBitmap)
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            contentDescription = "${values.name} wallpaper preview"
-        }, LinearLayout.LayoutParams(-1, dp(150)).apply { topMargin = dp(9) })
+        val wallpaperPreview = previewAssets.wallpaper(values, 150)
+        if (wallpaperPreview != null) preview.addView(wallpaperPreview, LinearLayout.LayoutParams(-1, dp(150)).apply { topMargin = dp(9) })
+        else if (values.wallpaperAsset != null) preview.addView(TextView(this).apply {
+            text = "Wallpaper file unavailable. Rebuild the theme bundle before applying."
+            setTextColor(UiTheme.textMuted)
+        }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
         preview.addView(TextView(this).apply {
-            text = "${values.layout} layout · ${values.typography} typography · ${values.iconStyle} icons · ${values.backgroundStyle} background · ${values.iconAssets.size} mapped apps" +
+            text = "${values.layout} layout · ${values.typography} typography · ${values.iconStyle} icons · ${values.backgroundStyle} background · " +
+                (if (values.iconAssets.isEmpty()) "known app labels mapped automatically" else "${values.iconAssets.size} saved app mappings") +
                 (values.iconPackPackage?.let { " · installed pack: $it" } ?: "")
             textSize = 11f
             typeface = fontFor(values.typography)
             setTextColor(primary)
             setPadding(0, dp(4), 0, dp(12))
         })
+        preview.addView(previewAssets.iconStrip(values, maxIcons = 6, iconSizeDp = 42),
+            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) })
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         listOf("Apps", "Widget", "Dock").forEachIndexed { index, label ->
             val fill = listOf(values.accent, values.accent2, values.card)[index]
@@ -307,10 +312,11 @@ class ThemeGalleryActivity : Activity() {
             values.iconAssets.values.distinct().forEach { asset ->
                 attributionStore.forAnyAsset(asset)?.let { record -> if (record !in this) add(record) }
             }
+            attributionStore.forAnyAsset("openmoji_1f4f7.png")?.let { record -> if (record !in this) add(record) }
         }
         preview.addView(TextView(this).apply {
             text = if (attribution.isEmpty()) {
-                "No remote attribution recorded. Unmapped apps keep their installed icons."
+                "No remote attribution recorded. Known app labels use local OpenMoji icons; other apps keep their installed icons."
             } else attribution.joinToString("\n") { "${it.title} · ${it.creator} · ${it.license}\n${it.sourceUrl}" } +
                 (if (attribution.any { it.title.contains("OpenMoji", true) }) "\nOpenMoji attribution: All emojis designed by OpenMoji – the open-source emoji and icon project. License: CC BY-SA 4.0." else "")
             textSize = 9f
