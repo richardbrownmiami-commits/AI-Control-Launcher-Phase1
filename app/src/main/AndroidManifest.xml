@@ -11,7 +11,18 @@
             <action android:name="org.adw.ActivityStarter.THEMES" />
         </intent>
         <intent>
+            <action android:name="org.adw.launcher.THEMES" />
+        </intent>
+        <intent>
             <action android:name="com.novalauncher.THEME" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="com.anddoes.launcher.THEME" />
+        </intent>
+        <intent>
+            <action android:name="ch.deletescape.lawnchair.ICONPACK" />
+            <category android:name="ch.deletescape.lawnchair.PICK_ICON" />
         </intent>
     </queries>
 

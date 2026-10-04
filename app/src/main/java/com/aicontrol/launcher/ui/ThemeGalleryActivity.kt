@@ -16,28 +16,56 @@ import android.widget.Toast
 import com.aicontrol.launcher.actions.ActionEngine
 import com.aicontrol.launcher.apps.AppRepository
 import com.aicontrol.launcher.assets.AssetAttributionStore
+import com.aicontrol.launcher.icons.IconPackCompatibility
+import com.aicontrol.launcher.icons.IconPackManager
+import com.aicontrol.launcher.icons.IconPackStore
 import com.aicontrol.launcher.theme.ThemeSpec
 
 @SuppressLint("SetTextI18n")
 class ThemeGalleryActivity : Activity() {
+    companion object { const val EXTRA_SELECT_ICON_PACK_FOR_THEME = "select_icon_pack_for_theme" }
     private lateinit var engine: ActionEngine
+    private lateinit var iconPacks: IconPackManager
     private lateinit var previewAssets: ThemePreviewAssets
     private lateinit var list: LinearLayout
     private lateinit var screenRoot: LinearLayout
     private lateinit var undoButton: Button
+    private var selectPackOnResume: String? = null
+    private var installReturnThemeName: String? = null
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         engine = ActionEngine(this)
+        iconPacks = IconPackManager(this)
         previewAssets = ThemePreviewAssets(this, engine, AppRepository(this))
+        selectPackOnResume = intent.getStringExtra(EXTRA_SELECT_ICON_PACK_FOR_THEME)
         UiTheme.bind(engine)
         build()
     }
 
     override fun onResume() {
         super.onResume()
-        if (::list.isInitialized) render()
+        if (::list.isInitialized) {
+            iconPacks.clearCache()
+            render()
+            val requested = selectPackOnResume
+            if (requested != null) {
+                selectPackOnResume = null
+                chooseThemeIconPack(requested)
+                return
+            }
+            val waitingForInstall = installReturnThemeName
+            if (waitingForInstall != null) {
+                installReturnThemeName = null
+                if (iconPacks.installedPacks().any { it.packageName == IconPackCompatibility.APPSTRACT_PACKAGE }) {
+                    Toast.makeText(this, "Appstract detected. Choose it for this theme to apply its real app icons.", Toast.LENGTH_LONG).show()
+                    chooseThemeIconPack(waitingForInstall)
+                } else {
+                    Toast.makeText(this, "Appstract is not installed yet. Return after the user-controlled F-Droid install, then choose the pack here.", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     private fun build() {
@@ -218,9 +246,7 @@ class ThemeGalleryActivity : Activity() {
             }
             card.addView(swatches)
             card.addView(TextView(this).apply {
-                text = "${values.layout.replaceFirstChar { it.uppercase() }} layout · ${values.iconStyle} icons · " +
-                    (if (values.iconAssets.isEmpty()) "known app icons auto-mapped" else "${values.iconAssets.size} saved app icons") +
-                    (if (values.iconPackPackage != null) " · installed pack" else "")
+                text = "${values.layout.replaceFirstChar { it.uppercase() }} layout · ${values.iconStyle} shape · ${previewAssets.packStatus(values)}"
                 textSize = 9f
                 typeface = fontFor(values.typography)
                 setTextColor(UiTheme.textMuted)
@@ -236,6 +262,14 @@ class ThemeGalleryActivity : Activity() {
                 background = UiTheme.rounded(themeAccent, 15f)
                 setOnClickListener { previewTheme(values) }
             }, LinearLayout.LayoutParams(-1, dp(44)))
+            actions.addView(Button(this).apply {
+                text = if (values.iconPackPackage.isNullOrBlank()) "Choose app icon pack" else "Change app icon pack"
+                textSize = 10f
+                isAllCaps = false
+                setTextColor(UiTheme.textPrimary)
+                background = UiTheme.rounded(UiTheme.card2, 15f)
+                setOnClickListener { chooseThemeIconPack(name) }
+            }, LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(5) })
             if (engine.isCustomTheme(name)) actions.addView(Button(this).apply {
                 text = "Edit assets"
                 textSize = 10f
@@ -283,15 +317,16 @@ class ThemeGalleryActivity : Activity() {
             setTextColor(UiTheme.textMuted)
         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
         preview.addView(TextView(this).apply {
-            text = "${values.layout} layout · ${values.typography} typography · ${values.iconStyle} icons · ${values.backgroundStyle} background · " +
-                (if (values.iconAssets.isEmpty()) "known app labels mapped automatically" else "${values.iconAssets.size} saved app mappings") +
-                (values.iconPackPackage?.let { " · installed pack: $it" } ?: "")
+            text = "${values.layout} layout · ${values.typography} typography · ${values.iconStyle} shape · ${values.backgroundStyle} background · " +
+                "${values.iconAssets.keys.count { !engine.isOpenMojiIllustration(values.name, it) }} custom image overrides · ${previewAssets.packStatus(values)}"
             textSize = 11f
             typeface = fontFor(values.typography)
             setTextColor(primary)
             setPadding(0, dp(4), 0, dp(12))
         })
         preview.addView(previewAssets.iconStrip(values, maxIcons = 6, iconSizeDp = 42),
+            LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) })
+        preview.addView(previewAssets.illustrationStrip(22),
             LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(7) })
         val row = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         listOf("Apps", "Widget", "Dock").forEachIndexed { index, label ->
@@ -309,6 +344,7 @@ class ThemeGalleryActivity : Activity() {
         val attributionStore = AssetAttributionStore(this)
         val attribution = buildList {
             values.wallpaperAsset?.let { attributionStore.forAsset("wallpaper", it)?.let(::add) }
+            values.iconPackPackage?.let { attributionStore.forAnyAsset(it)?.let(::add) }
             values.iconAssets.values.distinct().forEach { asset ->
                 attributionStore.forAnyAsset(asset)?.let { record -> if (record !in this) add(record) }
             }
@@ -316,7 +352,7 @@ class ThemeGalleryActivity : Activity() {
         }
         preview.addView(TextView(this).apply {
             text = if (attribution.isEmpty()) {
-                "No remote attribution recorded. Known app labels use local OpenMoji icons; other apps keep their installed icons."
+                "No remote attribution recorded. Real app icons come from the selected installed pack when mapped; otherwise the original installed app icons remain."
             } else attribution.joinToString("\n") { "${it.title} · ${it.creator} · ${it.license}\n${it.sourceUrl}" } +
                 (if (attribution.any { it.title.contains("OpenMoji", true) }) "\nOpenMoji attribution: All emojis designed by OpenMoji – the open-source emoji and icon project. License: CC BY-SA 4.0." else "")
             textSize = 9f
@@ -336,6 +372,52 @@ class ThemeGalleryActivity : Activity() {
                     Toast.makeText(this, "${values.name} applied", Toast.LENGTH_SHORT).show()
                     render()
                 }.onFailure { Toast.makeText(this, it.message ?: "Could not apply theme", Toast.LENGTH_LONG).show() }
+            }
+            .show()
+    }
+
+    private fun chooseThemeIconPack(themeName: String) {
+        val packs = iconPacks.installedPacks()
+        if (packs.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("Install a real Android app icon pack")
+                .setMessage("No compatible pack is installed. Appstract is an open-source Nova/ADW/Apex/Lawnchair icon pack. Open its official F-Droid page; Android/F-Droid controls installation. Return here afterwards and this theme's pack chooser will refresh.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Open Appstract on F-Droid") { _, _ ->
+                    installReturnThemeName = themeName
+                    IconPackStore.openAppstract(this).onFailure {
+                        installReturnThemeName = null
+                        Toast.makeText(this, it.message ?: "Could not open the F-Droid page", Toast.LENGTH_LONG).show()
+                    }
+                }
+                .show()
+            return
+        }
+        val options = listOf("Use system app icons") + packs.map { "${it.label} · ${it.packageName}" }
+        val active = runCatching { engine.themeValues(themeName).iconPackPackage }.getOrNull()
+            ?: engine.installedIconPack().takeIf { it.isNotBlank() }
+        val preferred = active?.takeIf { value -> packs.any { it.packageName == value } }
+            ?: packs.firstOrNull { it.packageName == IconPackCompatibility.APPSTRACT_PACKAGE }?.packageName
+            ?: packs.first().packageName
+        var selected = packs.indexOfFirst { it.packageName == preferred } + 1
+        AlertDialog.Builder(this)
+            .setTitle("App icon pack · $themeName")
+            .setSingleChoiceItems(options.toTypedArray(), selected) { _, which -> selected = which }
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save for theme") { _, _ ->
+                val packageName = if (selected == 0) null else packs.getOrNull(selected - 1)?.packageName
+                runCatching {
+                    engine.setThemeIconPack(themeName, packageName)
+                    if (engine.theme().equals(themeName, ignoreCase = true)) engine.setTheme(themeName)
+                    iconPacks.clearCache()
+                    UiTheme.bind(engine)
+                    render()
+                    Toast.makeText(
+                        this,
+                        if (packageName == null) "System app icons selected for $themeName" else "${packs.first { it.packageName == packageName }.label} saved for $themeName",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }.onFailure { Toast.makeText(this, it.message ?: "Could not save the icon-pack selection", Toast.LENGTH_LONG).show() }
             }
             .show()
     }

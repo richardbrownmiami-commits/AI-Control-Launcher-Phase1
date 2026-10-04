@@ -2,7 +2,10 @@ package com.aicontrol.launcher.assets
 
 import android.content.Context
 import com.aicontrol.launcher.actions.ActionEngine
-import com.aicontrol.launcher.apps.AppInfo
+import com.aicontrol.launcher.icons.IconPackCompatibility
+import com.aicontrol.launcher.icons.IconPackManager
+import com.aicontrol.launcher.icons.InstalledIconPack
+import com.aicontrol.launcher.icons.ThemeIconPackPolicy
 import java.util.Locale
 import java.util.concurrent.CancellationException
 
@@ -10,7 +13,7 @@ import java.util.concurrent.CancellationException
 data class ThemeBundleBuildResult(
     val wallpaperFile: java.io.File,
     val wallpaper: WallpaperCandidate,
-    val iconMappings: List<AppIconAssignment>,
+    val iconPack: InstalledIconPack?,
     val warnings: List<String>
 )
 
@@ -55,12 +58,11 @@ class ThemeBundleBuilder(context: Context) {
     private val appContext = context.applicationContext
     private val assets = LauncherAssetManager(appContext)
     private val engine = ActionEngine(appContext)
-    private val openMoji = OpenMojiIconLibrary(appContext)
+    private val iconPacks = IconPackManager(appContext)
 
     fun build(
         themeName: String,
         wallpaperQuery: String,
-        apps: List<AppInfo>,
         shouldContinue: () -> Boolean,
         onProgress: (String) -> Unit
     ): ThemeBundleBuildResult {
@@ -101,38 +103,21 @@ class ThemeBundleBuilder(context: Context) {
         val wallpaperCandidate = selected.first
         val wallpaper = selected.second
         engine.linkThemeWallpaper(themeName, wallpaper)
-
-        val assignments = mutableListOf<AppIconAssignment>()
-        try {
-            onProgress("Matching installed app labels to locally bundled OpenMoji icons…")
-            val glyphs = openMoji.bundledCatalog()
-            val matches = OpenMojiIconMatcher.assign(
-                glyphs,
-                apps.map { it.packageName to it.label },
-                themeName
-            ).take(40)
-            if (matches.isEmpty()) {
-                warnings += "No installed app labels matched OpenMoji's generic icon categories; unassigned apps will keep their current icons."
-            }
-            matches.forEachIndexed { index, match ->
-                if (!shouldContinue()) throw CancellationException("Theme asset search canceled.")
-                try {
-                    onProgress("Saving matching OpenMoji icon ${index + 1} of ${matches.size}: ${match.appLabel} · ${match.glyph.annotation}…")
-                    val file = openMoji.download(match.glyph, shouldContinue) { onProgress(it) }
-                    engine.linkThemeIcon(themeName, match.packageName, file)
-                    assignments += match
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (error: Exception) {
-                    warnings += "Skipped the ${match.appLabel} icon (${error.message ?: "download or image validation failed"})."
-                }
-            }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (error: Exception) {
-            warnings += "OpenMoji icons could not be saved (${error.message ?: "local asset unavailable"}); unmapped apps keep their current icons."
+        if (!shouldContinue()) throw CancellationException("Theme asset search canceled.")
+        onProgress("Checking compatible app icon packs installed on this device…")
+        val availablePacks = iconPacks.installedPacks()
+        val preferredPackage = ThemeIconPackPolicy.preferredPackage(
+            availablePacks.map { it.packageName },
+            engine.themeValues(themeName).iconPackPackage ?: engine.installedIconPack()
+        )
+        val selectedPack = availablePacks.firstOrNull { it.packageName == preferredPackage }
+        if (selectedPack != null) {
+            engine.setThemeIconPack(themeName, selectedPack.packageName)
+            onProgress("Saved the installed ${selectedPack.label} app icon pack with the theme…")
+        } else {
+            warnings += "No compatible Android app icon pack is installed. App icons will remain their original installed icons; install Appstract from F-Droid and choose it from the theme gallery to include real pack mappings (${IconPackCompatibility.APPSTRACT_FDROID_URL})."
         }
-        return ThemeBundleBuildResult(wallpaper, wallpaperCandidate, assignments, warnings.distinct())
+        return ThemeBundleBuildResult(wallpaper, wallpaperCandidate, selectedPack, warnings.distinct())
     }
 
 }

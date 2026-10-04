@@ -436,15 +436,15 @@ class AssistantActivity : Activity() {
                 null -> Unit
             }
             plan.actions.forEach { action -> add(when (action) {
-                is AiLauncherAction.SearchAssets -> "Build theme assets: search Commons for ‘${action.query}’, then match open-license app icons locally"
+                is AiLauncherAction.SearchAssets -> "Build theme assets: save a Commons wallpaper and attach a compatible installed Android app icon pack when available"
                 AiLauncherAction.AddWidget -> "Open Android’s widget picker"
                 is AiLauncherAction.SetLayout -> "Set layout to ${action.value}"
                 is AiLauncherAction.SetStyle -> "Set card style to ${action.value}"
                 is AiLauncherAction.ApplyInstalledIconPack -> "Apply installed icon pack ${action.label} (only mapped apps change)"
-                AiLauncherAction.BrowseIconPacks -> "Open the official Google Play icon-pack search; installation remains under your control"
+                AiLauncherAction.BrowseIconPacks -> "Open Appstract's official F-Droid page; any installation remains under your control"
             }) }
             if (plan.theme is AiThemeOperation.Create && plan.actions.any { it is AiLauncherAction.SearchAssets }) {
-                add("After this plan confirmation, one reuse-filtered wallpaper and suitable CC BY-SA OpenMoji app icons are selected automatically. You review the complete bundle once before Apply; there are no per-image approval prompts.")
+                add("After confirmation, one reuse-filtered wallpaper is saved and a compatible installed app icon pack is attached when available. You review the real pack and saved wallpaper before Apply; OpenMoji is decorative artwork only, not an app icon pack.")
             }
         }
         card.addView(TextView(this).apply {
@@ -521,7 +521,7 @@ class AssistantActivity : Activity() {
         }
         (result.command as? LauncherCommand.CreateTheme)?.let { command ->
             card.addView(TextView(this).apply {
-                text = "Optional complete build: find one reuse-cleared abstract wallpaper and matching OpenMoji icons, preview the bundle, then decide whether to apply it. Local Downloads are optional."
+                text = "Optional theme build: save one reuse-cleared abstract wallpaper and attach a compatible installed Android app icon pack when available, then review before Apply. OpenMoji remains decorative artwork only."
                 textSize = 11f
                 setTextColor(UiTheme.textMuted)
                 setPadding(0, dp(7), 0, dp(7))
@@ -600,7 +600,7 @@ class AssistantActivity : Activity() {
             setTextColor(UiTheme.accent)
         })
         addView(TextView(this@AssistantActivity).apply {
-            text = "${values.typography} type · ${values.iconStyle} icons · ${values.backgroundStyle} background · known app labels auto-map"
+            text = "${values.typography} type · ${values.iconStyle} icons · ${values.backgroundStyle} background · ${previewAssets.packStatus(values)}"
             textSize = 10f
             setTextColor(contrast(values.background))
             setPadding(0, dp(4), 0, dp(7))
@@ -614,6 +614,8 @@ class AssistantActivity : Activity() {
         addView(swatches)
         addView(previewAssets.iconStrip(values, maxIcons = 4, iconSizeDp = 28),
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
+        addView(previewAssets.illustrationStrip(18),
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(4) })
         layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5); bottomMargin = dp(8) }
         }
     }
@@ -663,13 +665,13 @@ class AssistantActivity : Activity() {
                 addWidget -> startActivity(Intent(this, MainActivity::class.java)
                     .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                     .putExtra(MainActivity.EXTRA_REQUEST_ADD_WIDGET, true))
-                browseIconPacks -> IconPackStore.open(this).getOrThrow()
+                browseIconPacks -> IconPackStore.openAppstract(this).getOrThrow()
             }
             setStatus(when {
-                query != null && draftName != null -> "Theme draft saved. An open-license wallpaper and known-label icons were bundled; preview the saved files before applying."
+                query != null && draftName != null -> "Theme draft saved. The wallpaper bundle is ready; a compatible installed app icon pack is attached when available. Review the saved wallpaper and real app icons before applying."
                 query != null -> "Confirmed. Wallpaper search is open; review a result and its license before downloading."
                 addWidget -> "Confirmed. Choose an installed widget in Android's picker."
-                browseIconPacks -> "Confirmed. Google Play search is open; install a pack there, then select it in Launcher settings."
+                browseIconPacks -> "Confirmed. Appstract's official F-Droid page is open; after the user-initiated install, return to select it in the theme gallery."
                 iconPackApplied -> "Confirmed. The installed icon pack is selected and will render on the launcher when you return."
                 else -> "Confirmed. The reviewed theme and layout changes were applied."
             }, true)

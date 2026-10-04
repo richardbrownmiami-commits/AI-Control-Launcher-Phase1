@@ -16,6 +16,7 @@ import com.aicontrol.launcher.icons.IconPackStore
 class LauncherSettingsActivity : Activity() {
     private lateinit var engine: ActionEngine
     private lateinit var packManager: IconPackManager
+    private var installedPackOptions: List<InstalledIconPackItem> = emptyList()
     private lateinit var themeSpinner: Spinner
     private lateinit var styleSpinner: Spinner
     private lateinit var layoutSpinner: Spinner
@@ -39,6 +40,11 @@ class LauncherSettingsActivity : Activity() {
         packManager = IconPackManager(this)
         UiTheme.bind(engine)
         build()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::packSpinner.isInitialized) refreshInstalledPackSpinner()
     }
 
     private fun <T> spinner(items: List<T>, selected: T): Spinner = Spinner(this).apply {
@@ -132,20 +138,19 @@ class LauncherSettingsActivity : Activity() {
             addView(drawerLabels)
         })
 
-        val installed = listOf(InstalledIconPackItem("", "System icons")) +
-            packManager.installedPacks().map { InstalledIconPackItem(it.packageName, it.label) }
-        packSpinner = spinner(installed.map { it.label }, installed.firstOrNull { it.packageName == engine.installedIconPack() }?.label ?: installed.first().label)
+        installedPackOptions = currentPackOptions()
+        packSpinner = spinner(installedPackOptions.map { it.label }, installedPackOptions.firstOrNull { it.packageName == engine.installedIconPack() }?.label ?: installedPackOptions.first().label)
         content.addView(sectionCard("Icon packs", "Use compatible packs already installed on Android", "✦").apply {
             addView(row("Active icon pack", packSpinner))
             addView(TextView(this@LauncherSettingsActivity).apply {
-                text = "Nova/ADW-compatible appfilter mappings are supported. Private backup formats and APK installation are not used."
+                text = "Nova, ADW, Apex and Lawnchair appfilter mappings are supported. Appstract is installed by the user through F-Droid; this launcher never downloads or installs APKs."
                 textSize = 11f
                 setTextColor(UiTheme.textMuted)
                 setPadding(dp(4), dp(4), dp(4), dp(4))
             })
-            addView(actionButton("Find icon packs on Google Play") {
-                IconPackStore.open(this@LauncherSettingsActivity).onFailure {
-                    Toast.makeText(this@LauncherSettingsActivity, it.message ?: "Could not open icon-pack search", Toast.LENGTH_LONG).show()
+            addView(actionButton("Appstract open-source pack on F-Droid") {
+                IconPackStore.openAppstract(this@LauncherSettingsActivity).onFailure {
+                    Toast.makeText(this@LauncherSettingsActivity, it.message ?: "Could not open the F-Droid page", Toast.LENGTH_LONG).show()
                 }
             })
         })
@@ -191,7 +196,7 @@ class LauncherSettingsActivity : Activity() {
             typeface = android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL)
             setTextColor(UiTheme.textOnAccent)
             background = UiTheme.gradient(18f)
-            setOnClickListener { saveSettings(installed) }
+            setOnClickListener { saveSettings() }
         }, LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(8) })
         setContentView(root)
     }
@@ -271,7 +276,19 @@ class LauncherSettingsActivity : Activity() {
         layoutParams = LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(4) }
     }
 
-    private fun saveSettings(installed: List<InstalledIconPackItem>) {
+    private fun currentPackOptions() = listOf(InstalledIconPackItem("", "System icons")) +
+        packManager.installedPacks().map { InstalledIconPackItem(it.packageName, it.label) }
+
+    private fun refreshInstalledPackSpinner() {
+        packManager.clearCache()
+        val previous = installedPackOptions.getOrNull(packSpinner.selectedItemPosition)?.packageName
+        installedPackOptions = currentPackOptions()
+        packSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, installedPackOptions.map { it.label })
+        val wanted = previous?.takeIf { value -> installedPackOptions.any { it.packageName == value } } ?: engine.installedIconPack()
+        packSpinner.setSelection(installedPackOptions.indexOfFirst { it.packageName == wanted }.coerceAtLeast(0))
+    }
+
+    private fun saveSettings() {
         engine.setTheme(themeSpinner.selectedItem.toString())
         engine.setStyle(styleSpinner.selectedItem.toString())
         engine.setLayout(layoutSpinner.selectedItem.toString())
@@ -285,7 +302,7 @@ class LauncherSettingsActivity : Activity() {
         engine.setDrawerSort(sortSpinner.selectedItem.toString())
         engine.setDrawerSearchVisible(drawerSearch.isChecked)
         engine.setDrawerLabels(drawerLabels.isChecked)
-        engine.setInstalledIconPack(installed[packSpinner.selectedItemPosition].packageName)
+        engine.setInstalledIconPack(installedPackOptions[packSpinner.selectedItemPosition].packageName)
         Toast.makeText(this, "Settings saved", Toast.LENGTH_SHORT).show()
         finish()
     }

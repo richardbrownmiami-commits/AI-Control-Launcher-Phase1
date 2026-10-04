@@ -18,16 +18,22 @@ internal object AssetSourcesDialog {
             <a href="https://commons.wikimedia.org/wiki/Special:MediaSearch?type=image&amp;search=abstract%20wallpaper">Browse Wikimedia Commons</a> ·
             <a href="https://commons.wikimedia.org/w/api.php">Commons API</a></p>
 
-            <p><b>App icons</b><br>
-            Common app labels map locally to original OpenMoji PNG symbols. The images are licensed
-            <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>; the app records
-            glyph-level source and license details and shows attribution in theme previews.<br>
-            <a href="https://github.com/hfg-gmuend/openmoji">Official OpenMoji repository</a></p>
+            <p><b>Real Android app icon packs</b><br>
+            Themes can use installed app-filter packs. The recommended open-source option is Appstract
+            (<code>dev.appstract.iconpack</code>), which lists nearly 590 icons and support for Nova,
+            Lawnchair, ADW, Apex, Action and other launchers. Compatible mappings are read from the
+            installed pack and applied only to apps it maps. The launcher never downloads or silently
+            installs an APK; installation remains a user action in F-Droid.<br>
+            <a href="https://f-droid.org/en/packages/dev.appstract.iconpack/">Appstract on F-Droid</a> ·
+            <a href="https://github.com/yangchoo/Appstract">Official Appstract source</a> ·
+            <a href="https://www.apache.org/licenses/LICENSE-2.0">Apache License 2.0</a></p>
 
-            <p><b>Icon packs</b><br>
-            OpenMoji files are visual PNG assets, not installable Android icon packs. Compatible
-            Nova/ADW packs may be selected only when already installed on this device. The app does
-            not download or install third-party APKs.</p>
+            <p><b>Optional OpenMoji artwork</b><br>
+            OpenMoji PNGs are decorative symbol illustrations, <b>not app icons and not an installable
+            icon pack</b>. They are licensed <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>
+            and retain glyph-level source/creator attribution.<br>
+            <a href="https://github.com/hfg-gmuend/openmoji">Official OpenMoji repository</a> ·
+            <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0 license</a></p>
         """.trimIndent()
         val message = TextView(activity).apply {
             text = Html.fromHtml(content, Html.FROM_HTML_MODE_LEGACY)

@@ -155,14 +155,27 @@ class AiPlanValidatorTest {
     }
 
     @Test
+    fun generatedThemeDefaultsToInstalledRealAppIconPackWhenAvailable() {
+        val decision = AiPlanValidator.parse(
+            """{"message":"A complete theme","theme":{"operation":"CREATE","name":"Blue glass"},"actions":[]}""",
+            themes,
+            mapOf("Other pack" to "org.example.other", "Appstract" to "dev.appstract.iconpack")
+        ) as AiPlanDecision.Review
+        val created = decision.plan.theme as AiThemeOperation.Create
+        assertEquals("dev.appstract.iconpack", created.values.iconPackPackage)
+    }
+
+    @Test
     fun explicitColorsOnlyRequestHasNoWallpaperOrSearchSideEffect() {
         val decision = AiPlanValidator.parse(
             """{"message":"Palette only","theme":{"operation":"CREATE","name":"Soft dusk"},"actions":[]}""",
             themes,
+            availableIconPacks = mapOf("Appstract" to "dev.appstract.iconpack"),
             promptContext = "Make a palette only, colors only, no wallpaper"
         ) as AiPlanDecision.Review
         val created = decision.plan.theme as AiThemeOperation.Create
         assertNull(created.values.wallpaperAsset)
+        assertNull(created.values.iconPackPackage)
         assertTrue(decision.plan.actions.isEmpty())
     }
 

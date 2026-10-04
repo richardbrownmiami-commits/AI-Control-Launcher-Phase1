@@ -1,6 +1,7 @@
 package com.aicontrol.launcher.ai
 
 import com.aicontrol.launcher.theme.ThemeSpec
+import com.aicontrol.launcher.icons.ThemeIconPackPolicy
 import com.aicontrol.launcher.assets.AssetSearchPolicy
 import org.json.JSONArray
 import org.json.JSONObject
@@ -111,9 +112,9 @@ object AiPlanValidator {
                             availableIconPacks.entries.firstOrNull {
                                 it.key.equals(requestedPack, ignoreCase = true) || it.value.equals(requestedPack, ignoreCase = true)
                             }?.value ?: throw IllegalArgumentException(
-                                "The requested icon pack is not installed or compatible. Install it from Google Play, then try again."
+                                "The requested icon pack is not installed or compatible. Install a compatible pack from its official source, then try again."
                             )
-                        }
+                        } ?: if (includeBundledWallpaper) ThemeIconPackPolicy.preferredPackage(availableIconPacks.values) else null
                     )
                 )
             }

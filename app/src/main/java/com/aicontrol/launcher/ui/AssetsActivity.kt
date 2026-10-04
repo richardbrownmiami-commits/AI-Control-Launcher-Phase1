@@ -98,7 +98,7 @@ class AssetsActivity : Activity() {
                 setTextColor(UiTheme.textPrimary)
             })
             addView(TextView(this@AssetsActivity).apply {
-                text = pendingThemeName?.let { "Commons wallpaper + automatic OpenMoji icons · $it" } ?: "Your private visual library"
+                text = pendingThemeName?.let { "Commons wallpaper + installed Android app icon pack · $it" } ?: "Your private visual library"
                 textSize = 11f
                 setTextColor(UiTheme.textMuted)
             })
@@ -126,6 +126,12 @@ class AssetsActivity : Activity() {
         root.addView(intro, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7); bottomMargin = dp(8) })
         root.addView(actionButton("Asset sources & licenses") { AssetSourcesDialog.show(this) },
             LinearLayout.LayoutParams(-1, dp(42)).apply { bottomMargin = dp(7) })
+        pendingThemeName?.let { themeName ->
+            root.addView(actionButton("Choose or install an app icon pack") {
+                startActivity(Intent(this, ThemeGalleryActivity::class.java)
+                    .putExtra(ThemeGalleryActivity.EXTRA_SELECT_ICON_PACK_FOR_THEME, themeName))
+            }, LinearLayout.LayoutParams(-1, dp(42)).apply { bottomMargin = dp(7) })
+        }
 
         val buttons = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         buttons.addView(actionButton("Import image") { pickLocalImage() }, LinearLayout.LayoutParams(0, dp(48), 1f))
@@ -134,10 +140,6 @@ class AssetsActivity : Activity() {
             askWallpaperQuery(query)
         }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { leftMargin = dp(7) })
         root.addView(buttons)
-        if (pendingThemeName != null) {
-            root.addView(actionButton("OpenMoji icon source & license") { AssetSourcesDialog.show(this) },
-                LinearLayout.LayoutParams(-1, dp(42)).apply { topMargin = dp(6) })
-        }
         searchRow = LinearLayout(this).apply {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(10), dp(5), dp(10), dp(5))
@@ -346,9 +348,8 @@ class AssetsActivity : Activity() {
         scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
-                    val installedApps = AppRepository(applicationContext).listLaunchableApps()
                     ThemeBundleBuilder(this@AssetsActivity).build(
-                        themeName, query, installedApps, { buildContinue.get() }
+                        themeName, query, { buildContinue.get() }
                     ) { message ->
                         runOnUiThread {
                             if (!isFinishing && buildContinue.get()) searchProgressLabel.text = message
@@ -400,14 +401,11 @@ class AssetsActivity : Activity() {
         }
         val builderNotes = buildList {
             add("Wallpaper: ${result.wallpaper.title} (${result.wallpaper.license})")
-            val savedIcons = result.iconMappings.count { assignment ->
-                engine.themeIconFile(targetName, assignment.packageName)?.let { file ->
-                    runCatching { ImageAssetValidation.validate(file) }.isSuccess
-                } == true
+            if (result.iconPack != null) {
+                add("Real app icon pack saved: ${result.iconPack.label} (${result.iconPack.packageName})")
+            } else {
+                add("No compatible app icon pack is installed. Appstract can be installed by you from F-Droid, then selected from the theme gallery.")
             }
-            add("OpenMoji app icons saved and checked: $savedIcons of ${result.iconMappings.size}")
-            result.iconMappings.take(12).forEach { add("${it.appLabel} → ${it.glyph.annotation}") }
-            if (result.iconMappings.size > 12) add("…and ${result.iconMappings.size - 12} more mappings")
             addAll(result.warnings)
         }
         showDraftThemePreview(builderNotes)
@@ -433,10 +431,11 @@ class AssetsActivity : Activity() {
         })
         body.addView(previewAssets.iconStrip(values, maxIcons = 6, iconSizeDp = 42),
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
+        body.addView(previewAssets.illustrationStrip(22),
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
         body.addView(TextView(this).apply {
             text = "${values.layout.uppercase()} layout · ${values.style} cards · ${values.iconStyle} icon shape · " +
-                (if (values.iconAssets.isEmpty()) "known app labels use OpenMoji" else "${values.iconAssets.size} saved app-icon mappings") +
-                (values.iconPackPackage?.let { " · installed pack: $it" } ?: "")
+                "${values.iconAssets.keys.count { !engine.isOpenMojiIllustration(targetName, it) }} custom image overrides · ${previewAssets.packStatus(values)}"
             textSize = 12f
             setTextColor(UiTheme.textPrimary)
             setPadding(0, dp(9), 0, dp(6))
@@ -451,28 +450,43 @@ class AssetsActivity : Activity() {
         body.addView(palette)
         val records = mutableListOf<com.aicontrol.launcher.assets.AssetAttribution>()
         values.wallpaperAsset?.let { catalog.wallpaperAttribution(it)?.let(records::add) }
+        values.iconPackPackage?.let { catalog.anyAttribution(it)?.let(records::add) }
         values.iconAssets.values.distinct().forEach { assetName ->
             catalog.anyAttribution(assetName)?.let { if (it !in records) records += it }
         }
         if (values.iconAssets.isNotEmpty() || values.wallpaperAsset != null) {
             catalog.anyAttribution("openmoji_1f4f7.png")?.let { if (it !in records) records += it }
         }
-        val iconsAreReadable = values.iconAssets.keys.all { packageName ->
+        val requiredImageOverrides = values.iconAssets.keys.filterNot { engine.isOpenMojiIllustration(targetName, it) }
+        val iconsAreReadable = requiredImageOverrides.all { packageName ->
             engine.themeIconFile(targetName, packageName)?.let { file ->
                 runCatching { ImageAssetValidation.validate(file) }.isSuccess
             } == true
         }
         val wallpaperIsReadable = values.wallpaperAsset == null || wallpaper != null
-        val canApplyCompleteBundle = iconsAreReadable && wallpaperIsReadable
+        val savedPackAvailable = values.iconPackPackage == null || previewAssets.packFor(values)?.packageName == values.iconPackPackage
+        val canApplyCompleteBundle = iconsAreReadable && wallpaperIsReadable && savedPackAvailable
         if (!canApplyCompleteBundle) body.addView(TextView(this).apply {
             text = "Some files referenced by this theme are missing or unreadable. Re-build the bundle before applying it."
             textSize = 11f
             setTextColor(UiTheme.accent)
             setPadding(0, dp(8), 0, dp(2))
         })
+        if (values.iconPackPackage.isNullOrBlank()) body.addView(TextView(this).apply {
+            text = "No real app icon pack is saved with this theme. Apps use the current launcher setting/original icons. Choose Appstract or another installed compatible pack to attach actual app-filter mappings."
+            textSize = 11f
+            setTextColor(UiTheme.textMuted)
+            setPadding(0, dp(7), 0, dp(2))
+        })
+        else if (!savedPackAvailable) body.addView(TextView(this).apply {
+            text = "The saved app icon pack is not installed. Install it from its official F-Droid page, then choose the detected pack before applying this theme."
+            textSize = 11f
+            setTextColor(UiTheme.accent)
+            setPadding(0, dp(7), 0, dp(2))
+        })
         val notes = buildList {
             if (buildNotes.isNotEmpty()) addAll(buildNotes)
-            else add("Saved app-icon mappings: ${values.iconAssets.size}. Known labels use OpenMoji; other apps keep their installed icons.")
+            else add("Custom image overrides: ${requiredImageOverrides.size}. Real app icons come from the selected installed Android icon pack when mapped; otherwise the original installed app icon remains.")
             if (records.isNotEmpty()) {
                 add("")
                 add("ATTRIBUTION")
@@ -484,7 +498,7 @@ class AssetsActivity : Activity() {
                 add("OpenMoji artwork is used unmodified under CC BY-SA 4.0. All emojis designed by OpenMoji – the open-source emoji and icon project.")
             }
             if (records.isEmpty() && values.wallpaperAsset != null) add("Local image chosen by you; no remote attribution was supplied.")
-            add("No character logo/artwork was downloaded. This changes this launcher's appearance only; it does not change Android's device wallpaper.")
+            add("This changes the launcher's background only; it does not change Android's device wallpaper. OpenMoji symbols shown above are decorative illustrations, never app icons.")
         }
         body.addView(TextView(this).apply {
             text = notes.joinToString("\n")
@@ -497,7 +511,17 @@ class AssetsActivity : Activity() {
             .setTitle("Preview complete theme · ${values.name}")
             .setView(scroll)
             .setNegativeButton("Keep as draft", null)
-            .setPositiveButton(if (canApplyCompleteBundle) "Apply complete theme" else "Bundle incomplete", null)
+            .setNeutralButton("Choose app icon pack") { _, _ ->
+                startActivity(Intent(this, ThemeGalleryActivity::class.java)
+                    .putExtra(ThemeGalleryActivity.EXTRA_SELECT_ICON_PACK_FOR_THEME, targetName))
+            }
+            .setPositiveButton(
+                when {
+                    !canApplyCompleteBundle -> "Bundle incomplete"
+                    values.iconPackPackage.isNullOrBlank() -> "Apply without an app pack"
+                    else -> "Apply theme"
+                }, null
+            )
             .create()
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).apply {
@@ -506,7 +530,11 @@ class AssetsActivity : Activity() {
                     runCatching {
                         engine.setTheme(targetName)
                         UiTheme.bind(engine)
-                        Toast.makeText(this@AssetsActivity, "${values.name} applied to this launcher", Toast.LENGTH_LONG).show()
+                        Toast.makeText(
+                            this@AssetsActivity,
+                            if (values.iconPackPackage.isNullOrBlank()) "${values.name} applied; no dedicated app icon pack is attached" else "${values.name} applied with its saved app icon pack",
+                            Toast.LENGTH_LONG
+                        ).show()
                         dialog.dismiss()
                         finish()
                     }.onFailure {

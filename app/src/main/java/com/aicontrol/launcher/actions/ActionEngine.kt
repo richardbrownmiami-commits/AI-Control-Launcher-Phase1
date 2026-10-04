@@ -4,13 +4,21 @@ import android.content.Context
 import android.graphics.Color
 import com.aicontrol.launcher.apps.AppRepository
 import com.aicontrol.launcher.assets.AssetStore
+import com.aicontrol.launcher.assets.AssetAttribution
 import com.aicontrol.launcher.assets.ImageAssetValidation
 import com.aicontrol.launcher.assets.LauncherAssetManager
+import com.aicontrol.launcher.icons.IconPackCompatibility
+import com.aicontrol.launcher.icons.IconPackManager
+import com.aicontrol.launcher.icons.ThemeIconPackPolicy
 import com.aicontrol.launcher.theme.ThemeSpec
+import com.aicontrol.launcher.theme.ThemeConfigCodec
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
+
+private const val SYSTEM_ICON_PACK_OVERRIDE = "@system"
 
 data class ThemeState(
     val bg: Int, val accent: Int, val accent2: Int, val card: Int, val style: String,
@@ -163,15 +171,16 @@ class ActionEngine(context: Context) {
     }
 
     private fun saveTheme(values: ThemeSpec.Values) {
+        val selectedValues = withPreferredInstalledIconPack(values)
         val conflictingCustomName = store.themes.listFiles()?.firstOrNull {
             it.isFile && it.extension.equals("json", true) &&
-                it.nameWithoutExtension.equals(values.name, ignoreCase = true) &&
-                it.nameWithoutExtension != values.name
+                it.nameWithoutExtension.equals(selectedValues.name, ignoreCase = true) &&
+                it.nameWithoutExtension != selectedValues.name
         }
         require(conflictingCustomName == null) { "A custom theme with the same name already exists; use the exact spelling to replace it." }
         recordThemeForRollback()
-        writeTheme(values)
-        setTheme(values.name)
+        writeTheme(selectedValues)
+        setTheme(selectedValues.name)
     }
 
     /** Saves a reviewed custom theme without changing the currently active launcher appearance. */
@@ -186,7 +195,7 @@ class ActionEngine(context: Context) {
                 it.nameWithoutExtension.equals(checked.name, ignoreCase = true) && it.nameWithoutExtension != checked.name
         }
         require(conflictingCustomName == null) { "A custom theme with the same name already exists; use the exact spelling to replace it." }
-        writeTheme(checked)
+        writeTheme(withPreferredInstalledIconPack(checked))
     }
 
     /** Attach a verified image from the private library to a saved custom theme. */
@@ -221,10 +230,29 @@ class ActionEngine(context: Context) {
         }
     }
 
+    /** Save a pack identity to a custom theme or built-in theme preference without installing it. */
+    fun setThemeIconPack(themeName: String, packageName: String?) {
+        val stored = availableThemes().firstOrNull { it.equals(themeName.trim(), ignoreCase = true) }
+            ?: error("Unknown theme '$themeName'.")
+        val installed = IconPackManager(appContext).installedPacks().map { it.packageName }.toSet()
+        val selected = ThemeIconPackPolicy.requireInstalled(packageName, installed)
+        val values = themeValues(stored).copy(iconPackPackage = selected)
+        if (isCustomTheme(stored)) writeTheme(values)
+        prefs.edit().putString(themeIconPackPreferenceKey(stored), selected ?: SYSTEM_ICON_PACK_OVERRIDE).apply()
+        recordIconPackAttribution(selected)
+    }
+
     fun themeIconFile(themeName: String, packageName: String): java.io.File? {
         val values = runCatching { themeValues(themeName) }.getOrNull() ?: return null
+        if (isOpenMojiIllustration(themeName, packageName)) return null
         if (packageName !in values.iconAssets) return null
         return store.themeIcon(themeName, packageName).takeIf { it.isFile }
+    }
+
+    fun isOpenMojiIllustration(themeName: String, packageName: String): Boolean {
+        val sourceName = runCatching { themeValues(themeName).iconAssets[packageName] }.getOrNull() ?: return false
+        val attribution = assetAttributions.forAnyAsset(sourceName)
+        return sourceName.startsWith("openmoji_", ignoreCase = true) || attribution?.title?.contains("OpenMoji", true) == true
     }
 
     private fun writeTheme(values: ThemeSpec.Values) {
@@ -322,6 +350,8 @@ class ActionEngine(context: Context) {
         require(availableThemes().any { it.equals(requested, ignoreCase = true) }) { "Unknown theme '$requested'" }
         val stored = availableThemes().first { it.equals(requested, ignoreCase = true) }
         val values = themeValues(stored)
+        val installedPacks = IconPackManager(appContext).installedPacks().map { it.packageName }.toSet()
+        val selectedIconPack = ThemeIconPackPolicy.requireInstalled(values.iconPackPackage, installedPacks)
         values.iconAssets.keys.forEach { packageName ->
             val icon = store.themeIcon(stored, packageName)
             require(icon.isFile) { "Theme icon for $packageName is missing from the saved bundle; no theme changes were applied." }
@@ -337,7 +367,42 @@ class ActionEngine(context: Context) {
         wallpaperFile?.let { assets.setLauncherWallpaper(it).getOrThrow() }
         prefs.edit().putString("theme", stored).putString("style", values.style).apply()
         setLayout(values.layout)
-        values.iconPackPackage?.let { prefs.edit().putString("installed_icon_pack", it).apply() }
+        when {
+            selectedIconPack != null -> prefs.edit().putString("installed_icon_pack", selectedIconPack).apply()
+            prefs.getString(themeIconPackPreferenceKey(stored), null) == SYSTEM_ICON_PACK_OVERRIDE ->
+                prefs.edit().remove("installed_icon_pack").apply()
+        }
+    }
+
+    private fun withPreferredInstalledIconPack(values: ThemeSpec.Values): ThemeSpec.Values {
+        val installed = IconPackManager(appContext).installedPacks().map { it.packageName }.toSet()
+        val requested = ThemeIconPackPolicy.requireInstalled(values.iconPackPackage, installed)
+        val preferred = requested ?: if (values.wallpaperAsset != null) {
+            ThemeIconPackPolicy.preferredPackage(installed, installedIconPack())
+        } else null
+        recordIconPackAttribution(preferred)
+        return values.copy(iconPackPackage = preferred)
+    }
+
+    private fun recordIconPackAttribution(packageName: String?) {
+        if (packageName != IconPackCompatibility.APPSTRACT_PACKAGE) return
+        assetAttributions.record(AssetAttribution(
+            type = "theme_icon_pack",
+            name = packageName,
+            title = "Appstract Android app icon pack",
+            creator = "yangchoo/Appstract contributors",
+            license = "Apache License 2.0",
+            licenseUrl = IconPackCompatibility.APPSTRACT_LICENSE_URL,
+            sourceUrl = IconPackCompatibility.APPSTRACT_SOURCE_URL
+        ))
+    }
+
+    private fun themeIconPackPreferenceKey(name: String) = "theme_icon_pack:${name.trim().lowercase(Locale.ROOT)}"
+
+    private fun withStoredIconPackOverride(name: String, values: ThemeSpec.Values): ThemeSpec.Values {
+        val override = prefs.getString(themeIconPackPreferenceKey(name), null) ?: return values
+        return if (override == SYSTEM_ICON_PACK_OVERRIDE) values.copy(iconPackPackage = null)
+        else values.copy(iconPackPackage = override)
     }
 
     fun setStyle(value: String) {
@@ -379,24 +444,7 @@ class ActionEngine(context: Context) {
         return runCatching {
             val snapshot = JSONObject(raw)
             val name = snapshot.getString("name")
-            val values = ThemeSpec.validate(
-                name = name,
-                background = snapshot.getString("bg"),
-                accent = snapshot.getString("accent"),
-                accent2 = snapshot.getString("accent2"),
-                card = snapshot.getString("card"),
-                style = snapshot.getString("style"),
-                typography = snapshot.getString("typography"),
-                iconStyle = snapshot.getString("iconStyle"),
-                backgroundStyle = snapshot.getString("backgroundStyle"),
-                layout = snapshot.optString("layout", ThemeSpec.DEFAULT_LAYOUT),
-                wallpaperAsset = snapshot.optString("wallpaperAsset").takeIf { it.isNotBlank() }
-                    ?: if (snapshot.optBoolean("paletteOnly", false)) null else ThemeSpec.bundledWallpaperAsset(name),
-                iconAssets = snapshot.optJSONObject("iconAssets")?.let { objectValue ->
-                    buildMap { objectValue.keys().forEach { key -> put(key, objectValue.optString(key)) } }
-                } ?: emptyMap(),
-                iconPackPackage = snapshot.optString("iconPackPackage").takeIf { it.isNotBlank() }
-            )
+            val values = ThemeConfigCodec.decode(snapshot, name)
             val customFile = store.themeFile(name)
             if (snapshot.optBoolean("custom", false)) customFile.writeText(themeJson(values).toString())
             else if (customFile.isFile) customFile.delete()
@@ -424,50 +472,17 @@ class ActionEngine(context: Context) {
         prefs.edit().putString("theme_rollback_snapshot", snapshot.toString()).apply()
     }
 
-    private fun themeJson(values: ThemeSpec.Values) = JSONObject()
-        .put("name", values.name)
-        .put("bg", values.background)
-        .put("accent", values.accent)
-        .put("accent2", values.accent2)
-        .put("card", values.card)
-        .put("style", values.style)
-        .put("typography", values.typography)
-        .put("iconStyle", values.iconStyle)
-        .put("backgroundStyle", values.backgroundStyle)
-        .put("layout", values.layout)
-        .put("wallpaperAsset", values.wallpaperAsset ?: "")
-        .put("paletteOnly", values.wallpaperAsset == null)
-        .put("iconPackPackage", values.iconPackPackage ?: "")
-        .put("iconAssets", JSONObject().apply { values.iconAssets.forEach { (pkg, asset) -> put(pkg, asset) } })
+    private fun themeJson(values: ThemeSpec.Values) = ThemeConfigCodec.encode(values)
 
     fun themeValues(name: String = theme()): ThemeSpec.Values {
         val customFile = store.themeFile(name)
         if (customFile.isFile) return try {
-            val json = JSONObject(customFile.readText())
-            val storedName = json.optString("name", name)
-            val wallpaperAsset = json.optString("wallpaperAsset").takeIf { it.isNotBlank() }
-                ?: if (json.optBoolean("paletteOnly", false)) null else ThemeSpec.bundledWallpaperAsset(storedName)
-            ThemeSpec.validate(
-                name = storedName,
-                background = json.optString("bg", ThemeSpec.DEFAULT_BACKGROUND),
-                accent = json.optString("accent", ThemeSpec.DEFAULT_ACCENT),
-                accent2 = json.optString("accent2", ThemeSpec.DEFAULT_ACCENT2),
-                card = json.optString("card", ThemeSpec.DEFAULT_CARD),
-                style = json.optString("style", ThemeSpec.DEFAULT_STYLE),
-                typography = json.optString("typography", ThemeSpec.DEFAULT_TYPOGRAPHY),
-                iconStyle = json.optString("iconStyle", ThemeSpec.DEFAULT_ICON_STYLE),
-                backgroundStyle = json.optString("backgroundStyle", ThemeSpec.DEFAULT_BACKGROUND_STYLE),
-                layout = json.optString("layout", ThemeSpec.DEFAULT_LAYOUT),
-                wallpaperAsset = wallpaperAsset,
-                iconAssets = json.optJSONObject("iconAssets")?.let { objectValue ->
-                    buildMap { objectValue.keys().forEach { key -> put(key, objectValue.optString(key)) } }
-                } ?: emptyMap(),
-                iconPackPackage = json.optString("iconPackPackage").takeIf { it.isNotBlank() }
-            )
+            withStoredIconPackOverride(name, ThemeConfigCodec.decode(JSONObject(customFile.readText()), name))
         } catch (error: Exception) {
             throw IllegalArgumentException("Saved theme '$name' is damaged; its bundle was not applied.", error)
         }
-        return ThemeSpec.builtIn(name) ?: ThemeSpec.validate(name)
+        val values = ThemeSpec.builtIn(name) ?: ThemeSpec.validate(name)
+        return withStoredIconPackOverride(name, values)
     }
 
     fun themeState(): ThemeState {

@@ -112,6 +112,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (::content.isInitialized) {
+            iconPacks.clearCache()
             runCatching { widgetHost.startListening() }
             UiTheme.bind(engine)
             currentPage = engine.homePage()
@@ -619,7 +620,7 @@ class MainActivity : Activity() {
                 is AiLauncherAction.SetLayout -> "Set launcher layout to ‘${action.value}’."
                 is AiLauncherAction.SetStyle -> "Set card style to ‘${action.value}’."
                 is AiLauncherAction.ApplyInstalledIconPack -> "Apply installed icon pack ‘${action.label}’ (${action.packageName}); only matching icons change."
-                AiLauncherAction.BrowseIconPacks -> "Open the official Google Play icon-pack search; installation remains under your control."
+                AiLauncherAction.BrowseIconPacks -> "Open Appstract's official F-Droid page; installation remains under your control."
             }
         }
         val body = LinearLayout(this).apply {
@@ -694,10 +695,10 @@ class MainActivity : Activity() {
                 .putExtra(AssetsActivity.EXTRA_SUGGESTED_QUERY, assetQuery)
                 .putExtra(AssetsActivity.EXTRA_THEME_NAME, themeDraftName.orEmpty()))
             chooseWidget -> addAndroidWidget()
-            browseIconPacks -> IconPackStore.open(this).getOrThrow()
+            browseIconPacks -> IconPackStore.openAppstract(this).getOrThrow()
         }
         val confirmation = if (assetQuery != null && themeDraftName != null) {
-            "Theme draft saved. A licensed wallpaper and known-label icons will be bundled automatically for review before apply."
+            "Theme draft saved. A licensed wallpaper will be bundled; a real compatible installed app icon pack is included when available. Review both before applying."
         } else "Confirmed plan applied. You can change installed icon packs in Launcher settings."
         Toast.makeText(this, confirmation, Toast.LENGTH_LONG).show()
     }
@@ -774,7 +775,7 @@ class MainActivity : Activity() {
             })
             addView(TextView(this@MainActivity).apply {
                 text = "${values.layout} layout · ${values.typography} type · ${values.iconStyle} icons · ${values.backgroundStyle} background. " +
-                    (if (values.iconAssets.isEmpty()) "Known app labels auto-map to OpenMoji." else "${values.iconAssets.size} saved app-icon mappings.")
+                    (values.iconPackPackage?.let { "Saved app icon pack: $it." } ?: "No pack saved; apps keep their installed icons unless a compatible pack is selected.")
                 textSize = 11f
                 setTextColor(backgroundText)
                 setPadding(0, dp(3), 0, dp(12))
@@ -802,14 +803,10 @@ class MainActivity : Activity() {
                 setTextColor(backgroundText)
                 setPadding(dp(4), dp(2), dp(4), 0)
             })
-            addView(TextView(this@MainActivity).apply {
-                text = "KNOWN APP LABELS · LOCAL OPENMOJI MAPPING"
-                textSize = 9f
-                setTextColor(backgroundText)
-                setPadding(0, dp(8), 0, dp(2))
-            })
             addView(previewAssets.iconStrip(values, maxIcons = 4, iconSizeDp = 30),
                 LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(2) })
+            addView(previewAssets.illustrationStrip(20),
+                LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(5) })
         }
     }
 
@@ -1105,11 +1102,8 @@ class MainActivity : Activity() {
         val themeIcon = engine.themeIconFile(engine.theme(), app.packageName)?.let {
             android.graphics.drawable.Drawable.createFromPath(it.absolutePath)
         }
-        val automaticIcon = previewAssets.bundledIconFile(app.label, engine.theme())?.let {
-            android.graphics.drawable.Drawable.createFromPath(it.absolutePath)
-        }
         val icon = ImageView(this).apply {
-            setImageDrawable(themeIcon ?: assets.iconDrawable(app.packageName) ?: pack ?: automaticIcon ?: app.icon)
+            setImageDrawable(themeIcon ?: assets.iconDrawable(app.packageName) ?: pack ?: app.icon)
             contentDescription = app.label
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(dp(4), dp(4), dp(4), dp(4))
@@ -1213,11 +1207,8 @@ class MainActivity : Activity() {
             val themeIcon = engine.themeIconFile(engine.theme(), app.packageName)?.let {
                 android.graphics.drawable.Drawable.createFromPath(it.absolutePath)
             }
-            val automaticIcon = previewAssets.bundledIconFile(app.label, engine.theme())?.let {
-                android.graphics.drawable.Drawable.createFromPath(it.absolutePath)
-            }
             dock.addView(ImageButton(this).apply {
-                setImageDrawable(themeIcon ?: assets.iconDrawable(app.packageName) ?: pack ?: automaticIcon ?: app.icon)
+                setImageDrawable(themeIcon ?: assets.iconDrawable(app.packageName) ?: pack ?: app.icon)
                 contentDescription = item.optString("label", app.label)
                 background = UiTheme.rounded(Color.TRANSPARENT, 16f)
                 setPadding(dp(6), dp(6), dp(6), dp(6))

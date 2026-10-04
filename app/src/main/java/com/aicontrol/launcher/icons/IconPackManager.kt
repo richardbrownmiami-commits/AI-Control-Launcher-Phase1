@@ -1,6 +1,5 @@
 package com.aicontrol.launcher.icons
 
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Drawable
@@ -15,10 +14,9 @@ class IconPackManager(private val context: Context) {
     private val cache = ConcurrentHashMap<String, Map<String, String>>()
 
     fun installedPacks(): List<InstalledIconPack> {
-        val actions = listOf("org.adw.ActivityStarter.THEMES", "com.novalauncher.THEME")
         val found = linkedMapOf<String, InstalledIconPack>()
-        actions.forEach { action ->
-            val intent = Intent(action)
+        IconPackCompatibility.queries.forEach { query ->
+            val intent = Intent(query.action).apply { query.category?.let(::addCategory) }
             // Nova's documented theme filter may contain the action but no CATEGORY_DEFAULT.
             // MATCH_DEFAULT_ONLY silently hides those valid packs, so query the action directly.
             pm.queryIntentActivities(intent, 0).forEach { ri ->
@@ -46,9 +44,8 @@ class IconPackManager(private val context: Context) {
     }
 
     fun iconDrawable(packPackage: String, packageName: String, activityName: String): Drawable? {
-        val map = cache.getOrPut(packPackage) { loadMappings(packPackage) }
-        val key = componentKey(packageName, activityName)
-        val drawableName = map[key] ?: map[packageName] ?: return null
+        val map = mappings(packPackage)
+        val drawableName = IconPackMappingResolver.drawableFor(map, packageName, activityName) ?: return null
         return runCatching {
             val resources = pm.getResourcesForApplication(packPackage)
             val id = resources.getIdentifier(drawableName, "drawable", packPackage)
@@ -56,45 +53,44 @@ class IconPackManager(private val context: Context) {
         }.getOrNull()
     }
 
+    fun hasIconMapping(packPackage: String, packageName: String, activityName: String): Boolean =
+        IconPackMappingResolver.drawableFor(mappings(packPackage), packageName, activityName) != null
+
     fun clearCache() { cache.clear() }
 
+    private fun mappings(packPackage: String): Map<String, String> =
+        cache.getOrPut(packPackage) { runCatching { loadMappings(packPackage) }.getOrDefault(emptyMap()) }
+
     private fun loadMappings(packPackage: String): Map<String, String> {
-        val result = linkedMapOf<String, String>()
         val ai = pm.getApplicationInfo(packPackage, 0)
         val resources = pm.getResourcesForApplication(ai)
         val id = resources.getIdentifier("appfilter", "xml", packPackage)
-        if (id == 0) return result
-        val parser = resources.getXml(id)
-        parser.use {
-            var event = it.eventType
-            while (event != XmlPullParser.END_DOCUMENT) {
-                if (event == XmlPullParser.START_TAG && it.name == "item") {
-                    val component = it.getAttributeValue(null, "component")
-                    val drawable = it.getAttributeValue(null, "drawable")
-                    if (!component.isNullOrBlank() && !drawable.isNullOrBlank()) {
-                        val normalized = normalizeComponent(component)
-                        result[normalized] = drawable
-                        val pkg = normalized.substringBefore("/")
-                        if (pkg.isNotBlank()) result.putIfAbsent(pkg, drawable)
-                    }
-                }
-                event = it.next()
-            }
+        if (id != 0) {
+            val parser = resources.getXml(id)
+            return try { readMappings(parser) } finally { parser.close() }
         }
-        return result
+        val packContext = context.createPackageContext(packPackage, Context.CONTEXT_RESTRICTED)
+        packContext.assets.open("appfilter.xml").use { input ->
+            val parser = Xml.newPullParser()
+            parser.setInput(input, "UTF-8")
+            return readMappings(parser)
+        }
     }
 
-    private fun componentKey(packageName: String, activityName: String) =
-        packageName + "/" + activityName
-
-    private fun normalizeComponent(raw: String): String {
-        var s = raw.trim()
-        if (s.startsWith("ComponentInfo{") && s.endsWith("}")) s = s.substring(14, s.length - 1)
-        val slash = s.indexOf('/')
-        if (slash < 0) return s
-        val pkg = s.substring(0, slash)
-        var cls = s.substring(slash + 1)
-        if (cls.startsWith(".")) cls = pkg + cls
-        return pkg + "/" + cls
+    private fun readMappings(parser: XmlPullParser): Map<String, String> {
+        val entries = mutableListOf<IconPackMappingEntry>()
+        var event = parser.eventType
+        while (event != XmlPullParser.END_DOCUMENT) {
+            if (event == XmlPullParser.START_TAG && parser.name == "item") {
+                val component = parser.getAttributeValue(null, "component")
+                val drawable = parser.getAttributeValue(null, "drawable")
+                if (!component.isNullOrBlank() && !drawable.isNullOrBlank()) {
+                    entries += IconPackMappingEntry(component, drawable)
+                    require(entries.size <= 100_000) { "Icon-pack mapping file exceeds its entry limit." }
+                }
+            }
+            event = parser.next()
+        }
+        return IconPackMappingResolver.index(entries)
     }
 }
